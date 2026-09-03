@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Teste WebSocket</title>
+</head>
+
+<body>
+
+    <h1>Teste Socket.IO</h1>
+
+    <button id="conectar">Conectar</button>
+    <button id="desconectar">Desconectar</button>
+
+    <br><br>
+
+    <input id="conversa" placeholder="ID da conversa" value="teste-123">
+    <button id="entrar">Entrar na conversa (join_conversation)</button>
+
+    <pre id="log"></pre>
+
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+    <script>
+
+        const log = document.getElementById("log");
+
+        function escrever(texto) {
+            log.textContent += texto + "\n";
+        }
+
+        const socket = io("http://localhost:5000", {
+            autoConnect: false
+        });
+
+        document.getElementById("conectar").onclick = () => {
+
+            escrever("🔄 Conectando em http://localhost:5000 ...");
+            socket.connect();
+
+        };
+
+        document.getElementById("desconectar").onclick = () => {
+
+            socket.disconnect();
+
+        };
+
+        socket.on("connect", () => {
+
+            escrever("✅ Conectado!");
+            escrever("Socket ID: " + socket.id);
+
+        });
+
+        socket.on("connect_error", (erro) => {
+
+            escrever("❌ Erro: " + erro.message);
+
+        });
+
+        document.getElementById("entrar").onclick = () => {
+
+            const conversaId = document.getElementById("conversa").value;
+
+            socket.emit("join_conversation", conversaId);
+            escrever("📤 join_conversation emitido: " + conversaId);
+
+        };
+
+        socket.on("disconnect", () => {
+
+            escrever("🔴 Desconectado");
+
+        });
+
+    </script>
+
+</body>
+
+</html>
