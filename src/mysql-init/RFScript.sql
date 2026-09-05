@@ -375,6 +375,28 @@ CREATE TABLE notification(
         ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+
+-- =====================================================================
+-- Tabela: otp
+-- =====================================================================
+DROP TABLE IF EXISTS otp;
+CREATE TABLE otp (
+    id          BINARY(16) PRIMARY KEY,
+    user_id     BINARY(16) NOT NULL,
+    code        CHAR(6) NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at  DATETIME NOT NULL,
+    used        TINYINT(1) NOT NULL DEFAULT 0,
+
+    KEY idx_otp_user (user_id),
+
+    CONSTRAINT fk_otp_user
+        FOREIGN KEY (user_id)
+        REFERENCES user(id)
+        ON DELETE CASCADE
+);
+
+
 -- =====================================================================
 -- Tabela: log
 -- (tabela genérica de auditoria; `reference_id`/`table` apontam para
