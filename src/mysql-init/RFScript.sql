@@ -37,7 +37,8 @@ CREATE TABLE user (
     cellphone     CHAR(11) NOT NULL,
     status        ENUM('inactive','awaitingForEmail','active') NOT NULL DEFAULT 'awaitingForEmail',
     created_in    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    photo         LONGBLOB NULL
+    photo         LONGBLOB NULL,
+    birthday      DATE NULL
 );
 
 -- =====================================================================
