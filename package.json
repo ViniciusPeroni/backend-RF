@@ -1,7 +1,7 @@
 {
-  "name": "alguma_api",
+  "name": "reaproveitaFranca_api",
   "version": "1.0.0",
-  "description": "Desenvolvimento teste",
+  "description": "Desenvolvimento",
   "main": "src/index.js",
   "scripts": {
     "start": "node --watch src/server.js",
@@ -12,6 +12,7 @@
   "dependencies": {
     "axios": "^1.19.0",
     "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv-safe": "^9.1.0",
     "express": "^4.22.2",
