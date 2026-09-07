@@ -53,7 +53,7 @@ const verifyCode = async (req, res) => {
     }
 
     await connect.promise().query(
-        `UPDATE user SET status = 'firstLogin' WHERE id = ?`,
+        `UPDATE user SET status = 'active' WHERE id = ?`,
         [id]
     );
 

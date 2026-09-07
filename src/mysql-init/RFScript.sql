@@ -35,7 +35,7 @@ CREATE TABLE user (
     email         VARCHAR(255) unique NOT NULL,
     password      VARCHAR(255) NOT NULL,
     cellphone     CHAR(11) NOT NULL,
-    status        ENUM('inactive','awaitingForEmail','firstLogin','active') NOT NULL DEFAULT 'awaitingForEmail',
+    status        ENUM('inactive','awaitingForEmail','active') NOT NULL DEFAULT 'awaitingForEmail',
     created_in    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     photo         LONGBLOB NULL
 );
