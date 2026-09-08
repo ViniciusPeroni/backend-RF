@@ -52,7 +52,7 @@ CREATE TABLE localization (
     neighborhood   VARCHAR(80) NOT NULL,
     number         VARCHAR(6) NOT NULL,
     city           VARCHAR(100) NOT NULL,
-    country        VARCHAR(70) NOT NULL,
+    state        CHAR(2) NOT NULL, -- sigla do estado (ex: SP)
     id_user        BINARY(16) NOT NULL,
     KEY `idx_localization_user` (`id_user`),
     CONSTRAINT `fk_localization_user`   
