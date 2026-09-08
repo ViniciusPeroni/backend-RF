@@ -35,9 +35,10 @@ CREATE TABLE user (
     email         VARCHAR(255) unique NOT NULL,
     password      VARCHAR(255) NOT NULL,
     cellphone     CHAR(11) NOT NULL,
-    status        ENUM('inactive','awaitingForEmail','firstLogin','active') NOT NULL DEFAULT 'awaitingForEmail',
+    status        ENUM('inactive','awaitingForEmail','active') NOT NULL DEFAULT 'awaitingForEmail',
     created_in    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    photo         LONGBLOB NULL
+    photo         LONGBLOB NULL,
+    birthday      DATE NULL
 );
 
 -- =====================================================================
@@ -51,7 +52,7 @@ CREATE TABLE localization (
     neighborhood   VARCHAR(80) NOT NULL,
     number         VARCHAR(6) NOT NULL,
     city           VARCHAR(100) NOT NULL,
-    country        VARCHAR(70) NOT NULL,
+    state        CHAR(2) NOT NULL, -- sigla do estado (ex: SP)
     id_user        BINARY(16) NOT NULL,
     KEY `idx_localization_user` (`id_user`),
     CONSTRAINT `fk_localization_user`   
@@ -374,6 +375,28 @@ CREATE TABLE notification(
         FOREIGN KEY (id_user) REFERENCES user(id)
         ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+
+-- =====================================================================
+-- Tabela: otp
+-- =====================================================================
+DROP TABLE IF EXISTS otp;
+CREATE TABLE otp (
+    id          BINARY(16) PRIMARY KEY,
+    user_id     BINARY(16) NOT NULL,
+    code        CHAR(6) NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at  DATETIME NOT NULL,
+    used        TINYINT(1) NOT NULL DEFAULT 0,
+
+    KEY idx_otp_user (user_id),
+
+    CONSTRAINT fk_otp_user
+        FOREIGN KEY (user_id)
+        REFERENCES user(id)
+        ON DELETE CASCADE
+);
+
 
 -- =====================================================================
 -- Tabela: log

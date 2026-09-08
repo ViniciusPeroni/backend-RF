@@ -23,7 +23,7 @@ class AppController {
   // Nós definimos as nossas ROTAS
   routes() {
     const apiRoutes = require('./routes/apiRoutes')
-    this.express.use('/api/v1/',apiRoutes)
+    this.express.use('/api/reaproveitafranca',apiRoutes)
   }
 }
 // Exporta a instância do Express já configurada acima, tornando-a acessível em outros arquivos
