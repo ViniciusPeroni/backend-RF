@@ -1,5 +1,6 @@
 const otpService = require('../services/otpService');
 const connect = require('../db/connect');
+const uuid = require('../utils/uuid');
 
 // Rate limit: 30s entre cada envio por usuário
 const sendTimestamps = new Map();
@@ -19,47 +20,61 @@ function verifyRateLimit(user_id) {
 }
 
 const sendCode = async (req, res) => {
-    const { id } = req.body;
+    try {
+        const { id } = req.body;
 
-    if (!id) return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
+        if (!id) return res.status(400).json({ error: 'ID do usuário é obrigatório.' });
+        if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
 
-    const [rows] = await connect.promise().query(
-        `SELECT email FROM user WHERE id = ?`, [id]
-    );
+        const userId = uuid.toBin(id);
 
-    if (rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
+        const [rows] = await connect.promise().query(
+            `SELECT email FROM user WHERE id = ?`, [userId]
+        );
 
-    const blocked = verifyRateLimit(id);
-    if (blocked !== null) {
-        return res.status(429).json({
-            error: `Aguarde ${blocked}s antes de solicitar um novo código`
-        });
+        if (rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+        const blocked = verifyRateLimit(id);
+        if (blocked !== null) {
+            return res.status(429).json({
+                error: `Aguarde ${blocked}s antes de solicitar um novo código`
+            });
+        }
+
+        await otpService.sendOtp(userId, rows[0].email);
+
+        return res.status(200).json({ message: 'Código enviado para o email' });
+    } catch (err) {
+        console.error('Erro em sendCode:', err);
+        return res.status(500).json({ error: 'Erro interno ao enviar o código.' });
     }
-
-    await otpService.sendOtp(id, rows[0].email);
-
-    return res.status(200).json({ message: 'Código enviado para o email' });
 };
 
 const verifyCode = async (req, res) => {
-    const { id, code } = req.body;
+    try {
+        const { id, code } = req.body;
 
-    if (!id || !code) return res.status(400).json({ error: 'ID do usuário e código são obrigatórios.' });
+        if (!id || !code) return res.status(400).json({ error: 'ID do usuário e código são obrigatórios.' });
+        if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
 
-    const result = await otpService.verifyOtp(id, code);
+        const result = await otpService.verifyOtp(uuid.toBin(id), String(code));
 
-    if (!result.valid) {
-        return res.status(401).json({ error: result.motive });
+        if (!result.valid) {
+            return res.status(401).json({ error: result.motive });
+        }
+
+        await connect.promise().query(
+            `UPDATE user SET status = 'active' WHERE id = ?`,
+            [uuid.toBin(id)]
+        );
+
+        return res.status(200).json({
+            message: "Email confirmado! Faça seu login!"
+        });
+    } catch (err) {
+        console.error('Erro em verifyCode:', err);
+        return res.status(500).json({ error: 'Erro interno ao verificar o código.' });
     }
-
-    await connect.promise().query(
-        `UPDATE user SET status = 'active' WHERE id = ?`,
-        [id]
-    );
-
-    return res.status(200).json({
-        message: "Email confirmado! Faça seu login!"
-    });
 };
 
 module.exports = { sendCode, verifyCode };

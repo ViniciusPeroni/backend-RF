@@ -1,7 +1,7 @@
 const cron = require("node-cron");
 // const cleanUpMessages = require("./services/");
 
-cron.schedule("0 * * * sun", async() => {
+cron.schedule("0 3 * * 0", async() => {
     try {
         await cleanUpMessages();
     } catch (error) {

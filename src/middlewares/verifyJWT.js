@@ -1,13 +1,15 @@
 const jwt = require("jsonwebtoken");
 
 function verifyJWT( req, res, next){
-    const token = req.headers["authorization"];
+    const header = req.headers["authorization"];
 
-    if(!token){
+    if(!header){
         return res
         .status(401)
         .json({auth: false, message: "Token não fornecido"});
     }
+
+    const token = header.startsWith("Bearer ") ? header.slice(7) : header;
 
     jwt.verify(token, process.env.SECRET, (err, decoded) => {
         if (err) {
@@ -21,6 +23,8 @@ function verifyJWT( req, res, next){
         }
 
         req.userId = decoded.id;
+        req.role = decoded.role;
+        req.userName = decoded.name;
         next();
 
     });
