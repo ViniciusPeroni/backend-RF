@@ -1,5 +1,3 @@
-const { route } = require("..");
-
 const router = require("express").Router();
 
 router.use("/user", require("./modules/userRoutes"));
