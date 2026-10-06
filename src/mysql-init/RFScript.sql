@@ -33,12 +33,14 @@ CREATE TABLE user (
     role          ENUM('user','company', 'admin') NOT NULL,
     name          VARCHAR(100) NOT NULL,
     email         VARCHAR(255) unique NOT NULL,
-    password      VARCHAR(255) NOT NULL,
-    cellphone     CHAR(11) NOT NULL,
+    password      VARCHAR(255) NULL,
+    cellphone     CHAR(11) NULL,
     status        ENUM('inactive','firstLogin','awaitingForEmail','active') NOT NULL DEFAULT 'awaitingForEmail',
     created_in    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     photo         LONGBLOB NULL,
-    birthday      DATE NULL
+    birthday      DATE NULL,
+    google_id     VARCHAR(255) NULL UNIQUE,
+    linkedin_id   VARCHAR(255) NULL UNIQUE
 );
 
 -- =====================================================================
