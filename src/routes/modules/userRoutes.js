@@ -16,6 +16,10 @@ router.use(globalLimiter);
 router.post("/create", upload.single("photo"), forceUserRole, userController.createUser);
 router.post("/create/empresa", upload.single("photo"), forceUserRole, userController.createCompany);
 router.post("/login", authLimiter, userController.loginUser);
+router.post("/login/google", authLimiter, userController.loginGoogle);
+router.get("/login/linkedin", authLimiter, userController.linkedinAuthUrl);
+router.get("/login/linkedin/callback", authLimiter, userController.linkedinCallback);
+router.post("/login/linkedin/callback", authLimiter, userController.linkedinCallback);
 router.post("/password/forgot", authLimiter, userController.forgotPassword);
 router.post("/password/reset", userController.resetPassword);
 

@@ -2,6 +2,9 @@ const otpService = require('../services/otpService');
 const connect = require("../db/connect");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const axios = require("axios");
+const crypto = require("crypto");
+const { OAuth2Client } = require("google-auth-library");
 const uuid = require('../utils/uuid');
 const doc = require('../services/docService');
 const loc = require('../services/localizationService');
@@ -350,6 +353,12 @@ const loginUser = async (req, res) => {
         }
 
         const user = rows[0];
+
+        // Conta criada só via login social (password NULL): não tem senha local.
+        if (!user.password) {
+            return res.status(401).json({ error: 'Conta criada via login social. Use login com Google ou LinkedIn.' });
+        }
+
         const validPassword = await bcrypt.compare(password, user.password);
 
         if (!validPassword) {
@@ -376,6 +385,267 @@ const loginUser = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ error: 'Erro ao realizar login.' });
+    }
+};
+
+// ======================================================
+// --------     Login social (Google + LinkedIn)
+// Sem photo_url: foto do provedor é ignorada.
+// ======================================================
+function issueSocialToken(user) {
+    return jwt.sign(
+        { id: user.id, role: user.role, name: user.name },
+        process.env.SECRET,
+        { expiresIn: '8h' }
+    );
+}
+
+// Login-ou-cadastro: procura pelo id do provedor, senão linka pelo
+// email, senão cria conta mínima ativa (sem senha/celular/CPF).
+async function findOrCreateSocialUser({ provider, providerId, email, name }) {
+    const column = provider === 'google' ? 'google_id' : 'linkedin_id';
+
+    const [byProvider] = await connect.promise().query(
+        `SELECT BIN_TO_UUID(id) AS id, role, name, email, status
+         FROM \`user\` WHERE \`${column}\` = ? LIMIT 1`,
+        [providerId]
+    );
+
+    if (byProvider.length > 0) {
+        const user = byProvider[0];
+        // Provedor já verificou o email: garante conta ativa.
+        if (user.status !== 'active' && user.status !== 'firstLogin') {
+            await connect.promise().query(
+                `UPDATE \`user\` SET status = 'active' WHERE \`${column}\` = ?`,
+                [providerId]
+            );
+            user.status = 'active';
+        }
+        return user;
+    }
+
+    const [byEmail] = await connect.promise().query(
+        `SELECT BIN_TO_UUID(id) AS id, role, name, email, status
+         FROM \`user\` WHERE email = ? LIMIT 1`,
+        [email]
+    );
+
+    if (byEmail.length > 0) {
+        const user = byEmail[0];
+        await connect.promise().query(
+            `UPDATE \`user\`
+             SET \`${column}\` = ?,
+                 status = CASE WHEN status IN ('active','firstLogin') THEN status ELSE 'active' END
+             WHERE email = ?`,
+            [providerId, email]
+        );
+        if (user.status !== 'active' && user.status !== 'firstLogin') {
+            user.status = 'active';
+        }
+        user[column] = providerId;
+        return user;
+    }
+
+    const id = uuid.generateId();
+    const safeName = (typeof name === 'string' && name.trim())
+        ? name.trim().slice(0, 100)
+        : String(email).split('@')[0].slice(0, 100);
+
+    await connect.promise().query(
+        `INSERT INTO \`user\` (id, role, name, email, password, cellphone, status, \`${column}\`)
+         VALUES (?, 'user', ?, ?, NULL, NULL, 'active', ?)`,
+        [uuid.toBin(id), safeName, email, providerId]
+    );
+
+    return { id, role: 'user', name: safeName, email, status: 'active', [column]: providerId };
+}
+
+// POST /user/login/google — Opção A (ID Token, sem OAuth completo)
+const loginGoogle = async (req, res) => {
+    const idToken = req.body.idToken || req.body.credential;
+
+    if (!idToken) {
+        return res.status(400).json({ error: 'idToken é obrigatório.' });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+        return res.status(500).json({ error: 'Login Google não configurado.' });
+    }
+
+    try {
+        const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+        const ticket = await client.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+
+        if (!payload || !payload.sub || !payload.email) {
+            return res.status(401).json({ error: 'Token Google inválido.' });
+        }
+
+        // Só linka conta local se o Google confirmou o email (anti-sequestro).
+        if (!payload.email_verified) {
+            return res.status(403).json({ error: 'E-mail do Google não verificado.' });
+        }
+
+        const user = await findOrCreateSocialUser({
+            provider: 'google',
+            providerId: payload.sub,
+            email: payload.email,
+            name: payload.name,
+        });
+
+        if (user.status !== 'active' && user.status !== 'firstLogin') {
+            return res.status(403).json({ error: 'Conta ainda não ativada.' });
+        }
+
+        const token = issueSocialToken(user);
+
+        return res.status(200).json({
+            message: 'Login com Google realizado com sucesso.',
+            token,
+            user,
+            mustChangePassword: false,
+        });
+    } catch (error) {
+        console.error('Erro em loginGoogle:', error.message);
+        return res.status(401).json({ error: 'Token Google inválido ou expirado.' });
+    }
+};
+
+// GET /user/login/linkedin — devolve a URL de autorização (OAuth2 + OIDC, gratuito)
+const linkedinAuthUrl = async (req, res) => {
+    const clientId = process.env.LINKEDIN_CLIENT_ID;
+    const redirectUri = process.env.LINKEDIN_REDIRECT_URI;
+
+    if (!clientId || !redirectUri) {
+        return res.status(500).json({ error: 'Login LinkedIn não configurado.' });
+    }
+
+    const state = crypto.randomBytes(16).toString('hex');
+    const scope = encodeURIComponent('openid profile email');
+    const url =
+        `https://www.linkedin.com/oauth/v2/authorization` +
+        `?response_type=code` +
+        `&client_id=${encodeURIComponent(clientId)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&scope=${scope}` +
+        `&state=${state}`;
+
+    return res.status(200).json({ url, state });
+};
+
+function decodeJwtPayload(idToken) {
+    try {
+        const parts = String(idToken).split('.');
+        if (parts.length < 2) return null;
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+    } catch {
+        return null;
+    }
+}
+
+// GET /user/login/linkedin/callback?code=... (ou POST com { code })
+const linkedinCallback = async (req, res) => {
+    const code = req.query.code || req.body.code;
+
+    if (!code) {
+        return res.status(400).json({ error: 'Parâmetro code é obrigatório.' });
+    }
+
+    const clientId = process.env.LINKEDIN_CLIENT_ID;
+    const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+    const redirectUri = process.env.LINKEDIN_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+        return res.status(500).json({ error: 'Login LinkedIn não configurado.' });
+    }
+
+    try {
+        // 1) Troca o code por access_token (+ id_token OIDC). Gratuito, sem lib paga.
+        const tokenRes = await axios.post(
+            'https://www.linkedin.com/oauth/v2/accessToken',
+            new URLSearchParams({
+                grant_type: 'authorization_code',
+                code: String(code),
+                redirect_uri: redirectUri,
+                client_id: clientId,
+                client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+        );
+
+        const { access_token, id_token } = tokenRes.data || {};
+
+        if (!access_token) {
+            return res.status(401).json({ error: 'Não foi possível autenticar com o LinkedIn.' });
+        }
+
+        // 2) Busca identidade verificada no endpoint OpenID userinfo.
+        let sub;
+        let email;
+        let emailVerified;
+        let name;
+
+        try {
+            const meRes = await axios.get('https://api.linkedin.com/v2/userinfo', {
+                headers: { Authorization: `Bearer ${access_token}` },
+                timeout: 15000,
+            });
+            sub = meRes.data.sub;
+            email = meRes.data.email;
+            emailVerified = meRes.data.email_verified;
+            name = meRes.data.name
+                || [meRes.data.given_name, meRes.data.family_name].filter(Boolean).join(' ');
+        } catch (userinfoError) {
+            console.error('Falha no userinfo LinkedIn, tentando id_token:', userinfoError.message);
+        }
+
+        // Fallback: decodifica o id_token (JWT assinado pelo LinkedIn).
+        if ((!sub || !email) && id_token) {
+            const decoded = decodeJwtPayload(id_token);
+            if (decoded) {
+                sub = sub || decoded.sub;
+                email = email || decoded.email;
+                emailVerified = emailVerified ?? decoded.email_verified;
+                name = name || decoded.name;
+            }
+        }
+
+        if (!sub || !email) {
+            return res.status(401).json({ error: 'LinkedIn não retornou identidade válida.' });
+        }
+
+        // Mesmo rigor do Google: só linka se o email foi verificado.
+        if (emailVerified === false || emailVerified === 'false') {
+            return res.status(403).json({ error: 'E-mail do LinkedIn não verificado.' });
+        }
+
+        const user = await findOrCreateSocialUser({
+            provider: 'linkedin',
+            providerId: String(sub),
+            email: String(email),
+            name,
+        });
+
+        if (user.status !== 'active' && user.status !== 'firstLogin') {
+            return res.status(403).json({ error: 'Conta ainda não ativada.' });
+        }
+
+        const token = issueSocialToken(user);
+
+        return res.status(200).json({
+            message: 'Login com LinkedIn realizado com sucesso.',
+            token,
+            user,
+            mustChangePassword: false,
+        });
+    } catch (error) {
+        const detail = error.response ? error.response.data : error.message;
+        console.error('Erro em linkedinCallback:', detail);
+        return res.status(401).json({ error: 'Falha na autenticação com o LinkedIn.' });
     }
 };
 
@@ -739,4 +1009,4 @@ const firstAccessPassword = async (req, res) => {
     }
 };
 
-module.exports = { createUser, createAdmin, createCompany, loginUser, getAllUsers, getUsersByName, updateUser, deleteUser, getUserById, patchPassword, forgotPassword, resetPassword, firstAccessPassword };
+module.exports = { createUser, createAdmin, createCompany, loginUser, loginGoogle, linkedinAuthUrl, linkedinCallback, getAllUsers, getUsersByName, updateUser, deleteUser, getUserById, patchPassword, forgotPassword, resetPassword, firstAccessPassword };
