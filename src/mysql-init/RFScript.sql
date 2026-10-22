@@ -55,6 +55,8 @@ CREATE TABLE localization (
     number         VARCHAR(6) NOT NULL,
     city           VARCHAR(100) NOT NULL,
     state        CHAR(2) NOT NULL, -- sigla do estado (ex: SP)
+    latitude       DECIMAL(10,8) NULL,
+    longitude      DECIMAL(11,8) NULL,
     id_user        BINARY(16) NOT NULL,
     KEY `idx_localization_user` (`id_user`),
     CONSTRAINT `fk_localization_user`   
