@@ -57,7 +57,7 @@ function chatSocket(io) {
                     return respond({ error: "id_answer inválido." });
                 }
 
-                const { id, recipient } = await messageService.createMessage({
+                const { id, recipients } = await messageService.createMessage({
                     conversationId,
                     id_user: userId,
                     type,
@@ -79,24 +79,26 @@ function chatSocket(io) {
 
                 io.to(String(conversationId)).emit("new_message", message);
 
-                emitToUser(recipient, "new_message", message);
-
                 const senderName = socket.userName || "Usuário";
                 const preview = type === "texto"
                     ? String(content).trim().slice(0, 120)
                     : `Enviou uma mensagem do tipo ${type}.`;
 
-                try {
-                    await notificationService.notifyUser({
-                        id_user: recipient,
-                        type: "nova_mensagem",
-                        title: `Nova mensagem de ${senderName}`.slice(0, 100),
-                        content: preview,
-                        reference_table: "conversation",
-                        reference_id: conversationId
-                    });
-                } catch (notifyError) {
-                    console.error("Erro ao notificar nova mensagem:", notifyError);
+                for (const recipient of recipients) {
+                    emitToUser(recipient, "new_message", message);
+
+                    try {
+                        await notificationService.notifyUser({
+                            id_user: recipient,
+                            type: "nova_mensagem",
+                            title: `Nova mensagem de ${senderName}`.slice(0, 100),
+                            content: preview,
+                            reference_table: "conversation",
+                            reference_id: conversationId
+                        });
+                    } catch (notifyError) {
+                        console.error("Erro ao notificar nova mensagem:", notifyError);
+                    }
                 }
 
                 return respond({ message: "Mensagem enviada com sucesso.", id });
