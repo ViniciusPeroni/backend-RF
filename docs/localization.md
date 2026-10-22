@@ -1,18 +1,19 @@
-# Convenções de português e formatos
+# Convenções de idioma, dados e formatos
 
-## Mensagens da API
+## Idioma e respostas
 
-- Mensagens voltadas a pessoas usuárias ficam em português brasileiro, concisas e sem detalhes internos do servidor.
-- Erros HTTP seguem `{ error: string }`; sucessos seguem o formato já usado pelo endpoint, geralmente `{ message, ... }`.
-- Não exponha stack traces, mensagens brutas do MySQL, token, CPF/CNPJ ou outros dados pessoais em resposta/log.
-- Preserve nomes de campo do contrato em payloads e filtros; não traduza nomes de propriedades de API sem uma mudança coordenada.
+- Mensagens voltadas às pessoas usuárias devem ser em português brasileiro, objetivas e sem detalhes internos.
+- Erros normalmente seguem `{ error: string }`; sucesso varia por endpoint, geralmente `{ message, ... }`. Preserve o contrato local.
+- Não traduza nomes de campos/payload sem mudança coordenada nos consumidores.
+- Não exponha stack trace, erro bruto do MySQL, token ou dados pessoais em resposta/log.
 
-## Dados e fronteiras
+## Identificadores e formatos
 
-- UUID é exposto como string e convertido para `BINARY(16)` com `src/utils/uuid.js` no limite da aplicação.
-- Valores monetários permanecem numéricos/DECIMAL na API e banco; formatação de exibição pertence aos clientes.
-- Datas `DATETIME` são geradas pelo MySQL em diversas tabelas. Não suponha timezone UTC sem contrato explícito; documente a semântica antes de alterar.
-- CEP e celular têm validações próprias; não trate formatação visual como validação de segurança.
-- CPF/CNPJ são normalizados para HMAC/cifra através de `docService`; não registre o valor original.
+- UUID aparece como string na API e é convertido em `BINARY(16)` no banco usando `src/utils/uuid.js`. Não passe string crua para query binária.
+- Dinheiro deve preservar representação numérica/DECIMAL no contrato; formatação visual pertence ao cliente.
+- Muitas datas são `DATETIME` geradas pelo MySQL. Não assuma UTC; documente timezone/semântica antes de mudar contrato.
+- CEP/celular têm validações próprias; máscara visual não é validação de segurança.
+- CPF/CNPJ devem ser normalizados/protegidos por `docService`, nunca registrados em claro.
+- Use crases em SQL para nomes reservados como `user`, `table` e `read`.
 
-Não há framework de tradução no backend. Siga as mensagens do controller próximo e mantenha os contratos técnicos estáveis.
+Não há framework de tradução no backend. Siga o controller vizinho e confirme contratos reais antes de alterar formatos. Consulte [`api-contract.md`](api-contract.md).

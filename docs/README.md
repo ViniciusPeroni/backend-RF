@@ -1,23 +1,38 @@
 # Documentação do backend
 
-Leia `AGENTS.md` antes de trabalhar neste repositório. Este índice aponta para os guias do backend; confira sempre as rotas, controllers, services e schema atuais se houver divergência.
+Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve o estado observado no código; não é especificação de funcionalidades futuras.
 
-## Ordem recomendada
+## Comece por aqui
 
-1. [`architecture.md`](architecture.md) — stack, inicialização, camadas e banco.
-2. [`api-contract.md`](api-contract.md) — endpoints, autenticação e eventos Socket.IO verificados.
-3. [`product.md`](product.md) — contexto do TCC e situação das funcionalidades.
-4. [`security-privacy.md`](security-privacy.md) — JWT, autorização, dados pessoais e sockets.
-5. [`quality.md`](quality.md) — verificações disponíveis e roteiro de testes.
-6. [`agent-workflow.md`](agent-workflow.md) e [`feature-readiness.md`](feature-readiness.md) — fluxo de trabalho e evidências de conclusão.
-7. [`localization.md`](localization.md) — mensagens, UUIDs e formatos.
-8. [`integration-workflow.md`](integration-workflow.md), [`decisions.md`](decisions.md) e [`adr/README.md`](adr/README.md) — integração entre aplicações e decisões técnicas.
+1. Leia [`../AGENTS.md`](../AGENTS.md) para as regras obrigatórias do repositório.
+2. Identifique a tarefa e consulte apenas os guias aplicáveis abaixo.
+3. Confirme rotas, middleware, controllers, services e schema atuais antes de assumir um comportamento.
+4. Ao concluir, relate alterações, verificações executadas e limitações; não faça commit/push sem autorização.
 
-## Fatos rápidos
+## Mapa por objetivo
 
-- Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
-- Prefixo HTTP: `/api/reaproveitafranca`; porta: `PORT` ou 5000.
-- CPF/CNPJ usam HMAC e AES-256-GCM; não documente chaves nem dados pessoais reais.
-- Não há scripts permanentes de teste, lint, build ou typecheck.
-- `src/mysql-init/RFScript.sql` apaga e recria o banco `Reaproveita_Franca`; não o execute em base com dados importantes.
-- A tabela `notification` existe no schema, mas não há controller/rota de notificações nesta revisão da `main`.
+| Se você vai… | Leia primeiro |
+|---|---|
+| Entender inicialização, camadas ou MySQL | [architecture.md](architecture.md) |
+| Alterar ou integrar uma rota/evento | [api-contract.md](api-contract.md), [integration-workflow.md](integration-workflow.md) |
+| Trabalhar com autenticação, documentos ou dados pessoais | [security-privacy.md](security-privacy.md) |
+| Alterar textos, UUIDs, datas ou formatos | [localization.md](localization.md) |
+| Planejar ou verificar uma funcionalidade | [feature-readiness.md](feature-readiness.md), [quality.md](quality.md) |
+| Executar uma tarefa como agente | [agent-workflow.md](agent-workflow.md) |
+| Entender o escopo real do produto | [product.md](product.md) |
+| Registrar decisão técnica duradoura | [decisions.md](decisions.md), [adr/README.md](adr/README.md) |
+
+## Referência rápida
+
+- Stack: Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
+- Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.
+- Aplicações web e móvel são projetos independentes. Esta documentação cobre somente `backend-RF/`.
+- Não há scripts permanentes de teste, lint, build ou typecheck no `package.json`.
+- `src/mysql-init/RFScript.sql` contém `DROP DATABASE`; nunca o execute em banco com dados importantes.
+- CPF/CNPJ não podem ser persistidos em texto puro. Não inclua segredos ou dados pessoais em documentação, logs ou exemplos.
+
+## Fonte da verdade e manutenção
+
+O código e o schema atuais são a fonte da verdade. Se houver divergência, confira a implementação e atualize o documento afetado com evidência. Indique explicitamente se algo é requisito, schema disponível, API disponível, integração exercitada ou lacuna. Não transforme tabela, enum ou comentário em promessa de funcionalidade.
+
+Revise links locais e afirmações técnicas quando editar documentação. Não duplique este mapa nos documentos temáticos: mantenha aqui a navegação e, em cada guia, o conteúdo especializado.

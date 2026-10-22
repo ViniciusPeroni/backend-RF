@@ -1,34 +1,39 @@
-# Prontidão de funcionalidades e evidências
+# Prontidão de funcionalidades e critérios de evidência
 
-Uma tabela no banco, uma rota isolada ou um evento socket não comprovam um fluxo completo. Use rótulos de evidência, não percentuais sem critério.
+Use este vocabulário em tarefas, revisão documental e relatórios. Não use percentuais sem critério reproduzível.
 
-## Vocabulário de status
+## Estados
 
-- **Proposto:** requisito/ideia; implementação não verificada.
-- **Schema disponível:** tabelas/colunas existem; não implica API.
-- **API disponível:** rota ou evento existe; fluxo integrado não foi exercitado.
-- **Integrado:** comportamento foi exercitado com banco/cliente relevante, incluindo sucesso e falhas importantes.
-- **Pronto:** integrado, autorização e validação revisadas, operação observável e limitações conhecidas documentadas.
-- **Bloqueado:** dependência ou decisão explícita impede avançar.
+| Estado | Significado | Evidência mínima |
+|---|---|---|
+| **Proposto** | Requisito ou ideia ainda não confirmado no código | Referência do requisito; sem alegar implementação |
+| **Schema disponível** | Estrutura de banco existe | Tabela/coluna/enum localizado; sem inferir endpoint |
+| **API disponível** | Rota ou evento está montado | Arquivo, método/path/evento e middleware confirmados |
+| **Integrado** | Fluxo foi exercitado no contexto relevante | Cenários de sucesso e falhas importantes, com banco/cliente quando necessário |
+| **Pronto** | Fluxo integrado com controles revistos e limitações documentadas | Evidência de integração + auth/ownership/validação/observabilidade revisadas |
+| **Bloqueado** | Dependência ou decisão impede avanço | Bloqueio e responsável/decisão necessários descritos |
 
-## Evidências a registrar
+Um estado alto não pode ser inferido de um baixo. Uma tabela, enum, controller isolado ou teste de sintaxe não prova um fluxo completo.
 
-- Método/path ou evento e arquivo que o monta.
-- Middleware, papel, usuário proprietário e validações.
-- Request/ack/resposta e estados de erro observados.
-- Persistência verificada em banco descartável quando necessária.
-- Comando executado e resultado literal/resumido.
-- Serviços externos, SMTP, OAuth ou sockets não testados no ambiente.
-- Lacunas de segurança ou fluxo que limitam a prontidão.
+## Checklist para agentes
 
-## Modelo para atualização
+- [ ] Confirme arquivo e método/path/evento real.
+- [ ] Registre middleware, papel e verificação de propriedade do recurso.
+- [ ] Confirme validação, payload, status e forma de sucesso/erro no controller.
+- [ ] Confirme efeito no banco/socket se aplicável.
+- [ ] Execute os cenários pertinentes em ambiente seguro; anote o comando e resultado.
+- [ ] Declare SMTP, OAuth, MySQL ou cliente não disponível como limitação, sem alegar integração.
+- [ ] Atualize apenas os documentos cujo fato verificado mudou.
+
+## Modelo de registro
 
 ```text
-Status: Proposto | Schema disponível | API disponível | Integrado | Pronto | Bloqueado
-Evidência: rota/evento, arquivos e cenário exercitado
-Verificações: comandos e resultados
-Limitações: comportamento não implementado ou não testado
-Dependências: cliente, serviço externo ou decisão de produto
+Estado: Proposto | Schema disponível | API disponível | Integrado | Pronto | Bloqueado
+Evidência de implementação: arquivo + método/path/evento
+Autorização e validação: middleware, papel, propriedade e entradas verificadas
+Verificações: comandos/cenários e resultados observados
+Limitações: casos não exercitados e lacunas conhecidas
+Dependências/bloqueios: ambiente, cliente, serviço externo ou decisão
 ```
 
-Mantenha desconhecidos como desconhecidos. Consulte [api-contract.md](api-contract.md) e [product.md](product.md) antes de declarar capacidade entregue.
+Consulte [`api-contract.md`](api-contract.md), [`product.md`](product.md) e [`quality.md`](quality.md). Registre desconhecidos como desconhecidos.

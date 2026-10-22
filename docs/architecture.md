@@ -2,55 +2,55 @@
 
 ## Escopo e stack
 
-Este repositório entrega a API do Reaproveita Franca. É uma aplicação independente dos clientes web e móvel, sem TypeScript e sem etapa de build.
+Este repositório contém a API do Reaproveita Franca. Web e mobile são aplicações independentes. Backend em JavaScript CommonJS, Node.js, Express 4, MySQL 8 via `mysql2`, Socket.IO e `dotenv-safe`; não há TypeScript nem etapa de build.
 
-- Node.js e JavaScript CommonJS.
-- Express 4 para HTTP REST.
-- MySQL 8 com pool compartilhado `mysql2`.
-- Socket.IO para comunicação em tempo real.
-- `dotenv-safe` para carregamento e validação de variáveis de ambiente.
-- Comando principal: `npm start` (`node --watch src/server.js`).
+## Inicialização e fluxo
 
-## Inicialização e fluxo de requisição
+- `npm start` executa `node --watch src/server.js`.
+- `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets e escuta em `PORT` ou `5000`.
+- `src/index.js` carrega ambiente, cria parsers e rotas, chama o teste de conexão MySQL e monta `/api/reaproveitafranca`.
+- `src/index.js` tenta `dotenv-safe` e captura falhas para recorrer a `dotenv`. Não assuma validação fatal sem conferir o boot real.
 
-`src/server.js` cria o servidor HTTP, configura CORS, instancia Socket.IO e registra os handlers de `src/sockets/index.js`. `src/index.js` cria o Express, configura parsers, monta as rotas no prefixo `/api/reaproveitafranca` e executa a verificação de conectividade MySQL.
-
-Fluxo REST predominante:
+Fluxo REST mais comum:
 
 ```text
 src/routes/apiRoutes.js
   → src/routes/modules/*Routes.js
-  → src/middlewares/* (quando aplicável)
+  → src/middlewares/* (quando montado)
   → src/controllers/*
-  → src/services/*
+  → src/services/* (quando utilizado)
   → src/db/connect.js (pool mysql2)
 ```
 
-`userController.js` ainda consulta o pool diretamente em diversos fluxos. Não aumente essa exceção automaticamente em código novo; siga o padrão service/controller quando apropriado.
+`userController.js` consulta o pool diretamente em diversos caminhos. Considere isso uma exceção existente, não um padrão novo. `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não conectados ao fluxo atual.
 
-## Organização atual
+## Organização
 
 ```text
 src/
-  controllers/       # HTTP: validação de entrada, status e formato da resposta
-  db/                # pool MySQL e teste de conectividade
-  middlewares/       # JWT, papel, upload, validação e rate limits
-  mysql-init/        # schema inicial e migração social login
-  routes/            # montagem da API e rotas por módulo
-  services/          # consultas e regras de acesso a dados
-  sockets/           # handler Socket.IO atual para entrada em salas de conversa
-  utils/             # UUID, documentos e utilitários de e-mail/OTP
+  controllers/       # entrada HTTP, validação/status/respostas
+  db/                # pool e conectividade
+  middlewares/       # JWT, papel, upload, validação, limites
+  mysql-init/        # schema inicial e migração SQL
+  routes/            # montagem e módulos REST
+  services/          # acesso a dados/regras compartilhadas
+  sockets/           # handlers Socket.IO
+  utils/             # UUID, documentos e utilitários
 ```
 
-## Banco e identificadores
+## Banco e IDs
 
-- O schema de referência é `src/mysql-init/RFScript.sql`; tabelas não equivalem a APIs implementadas.
-- IDs primários e relações UUID usam `BINARY(16)`. Gere UUIDv7 com `utils/uuid.generateId()`, converta com `toBin()` e exponha strings por `BIN_TO_UUID()`/`fromBin()`.
-- Use crases para palavras reservadas em SQL, especialmente `user`, `table` e `read`.
-- A aplicação pode iniciar mesmo se MySQL estiver indisponível; `testConnect()` apenas registra a falha. Isso não significa que endpoints dependentes do banco funcionarão.
+- Schema base: `src/mysql-init/RFScript.sql`; começa removendo e recriando `Reaproveita_Franca`. Não executar em banco com dados importantes.
+- `src/mysql-init/migration_social_login.sql` é uma migração SQL manual/aditiva. Não há ORM nem framework de migrations.
+- UUIDv7 é exposto como string e armazenado como `BINARY(16)`. Use `src/utils/uuid.js` na fronteira e `BIN_TO_UUID()` nas leituras; confira os módulos existentes antes de alterar padrão.
+- Use crases para identificadores reservados como `user`, `table` e `read`.
+- O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.
+- A tabela `conversation_participant` e tabelas de domínio não demonstram fluxos REST/socket implementados.
 
-O schema também contém `conversation_participant` para participantes de conversas. A existência dessa tabela não significa que o fluxo de conversa esteja implementado por completo.
+## Estado de chat e agendamentos
 
-## Chat e notificações
+O socket atual só trata `join_conversation`; não autentica conexão, valida participante, envia ou persiste mensagens. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
 
-Na revisão atual da `main`, `src/sockets/chatSocket.js` implementa somente `join_conversation`, que coloca o socket em uma sala pelo ID recebido. Não há autenticação de socket, persistência de mensagem ou evento de envio implementado. A tabela `notification` está no schema, mas não há controller, rota ou gatilho automático de notificação nesta revisão. Confira [api-contract.md](api-contract.md) e [security-privacy.md](security-privacy.md).
+## Riscos de compatibilidade
+
+`src/index.js` requer `./db/testConnect`, mas o arquivo no repositório é `src/db/testconnect.js`. A resolução pode funcionar em Windows/macOS e falhar em filesystem sensível a caixa (Linux/CI). Não confunda compatibilidade local com portabilidade.

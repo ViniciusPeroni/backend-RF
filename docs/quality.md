@@ -1,27 +1,45 @@
-# Qualidade e verificação do backend
+# Qualidade e verificação
 
-## Comandos disponíveis
+## Estado das ferramentas
 
-O `package.json` não configura suíte de testes, lint, typecheck ou build. Não use `npm test` como se existisse. O comando de execução é `npm start`; `npm run start:dev` depende de `nodemon` global.
+O `package.json` define somente `npm start` (`node --watch src/server.js`) e `npm run start:dev` (requer `nodemon` global, não declarado no projeto). Não há scripts/configuração de testes, lint, typecheck ou build. Não invente comandos como `npm test`.
 
-Verificação de sintaxe para arquivos JavaScript alterados:
+O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 
-```bash
+## Verificações proporcionais
+
+### JavaScript alterado
+
+```powershell
 node --check src/controllers/arquivoController.js
-node --check src/services/arquivoService.js
 ```
 
-Essa verificação não comprova consulta SQL, middleware, configuração de banco nem comportamento HTTP.
+Repita para cada arquivo JS alterado. Isso verifica sintaxe, não consulta SQL ou comportamento HTTP.
 
-## Roteiro de verificação por mudança
+### API e banco
 
-- Inicie com `.env` de desenvolvimento e banco descartável/local; confirme a conexão nos logs.
-- Exercite os métodos/paths reais com HTTP e credenciais de teste, incluindo sucesso, validação, UUID inválido, não encontrado, não autenticado e sem permissão quando aplicável.
-- Para operações de banco, confirme a persistência e o escopo de usuário com dados sintéticos.
-- Para Socket.IO, teste handshake sem/ com token, autorização da conversa, callback, eventos enviados e persistência.
-- Para e-mail e provedores sociais, diferencie integração simulada de entrega/provedor real. Nunca reporte envio real sem evidência.
-- Revise status e diff final. Não execute o schema destrutivo contra banco com dados importantes.
+Com `.env` local seguro e banco descartável/de desenvolvimento:
 
-## Relato de evidências
+- inicialize com `npm start` e confirme logs, porta e conectividade;
+- faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
+- confirme persistência e isolamento por usuário com dados sintéticos;
+- limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
 
-Informe comandos exatos e resultado. Distinga validação de sintaxe, smoke test de carregamento, HTTP contra banco real, teste Socket.IO e integração com serviço externo. Indique ambiente indisponível ou cenários não cobertos. Teste temporário não significa que o projeto possui suíte permanente.
+### Socket.IO e provedores externos
+
+- A página `src/sockets/test/socket-test.html` pode ajudar no teste manual de conexão, mas o evento atualmente documentado não autentica nem valida participação.
+- Separe comportamento simulado de entrega SMTP/OAuth real; não reporte integração externa sem evidência do provedor.
+- Não conecte teste a dados pessoais ou produção.
+
+## Níveis de evidência
+
+| Verificação | O que sustenta | O que não sustenta |
+|---|---|---|
+| `node --check` | Sintaxe JS | Rota, SQL, auth ou comportamento |
+| Inicialização | Processo e carregamento inicial | Conectividade funcional de todos endpoints |
+| HTTP com banco | Cenário de rota exercitado | Outros cenários/clientes não testados |
+| Socket/integração externa | Apenas eventos/serviços efetivamente exercitados | Segurança ou disponibilidade fora dos cenários |
+
+## Relato de qualidade
+
+Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. “Não há suíte automatizada” deve continuar explícito até que uma suíte seja realmente adicionada. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade.

@@ -1,54 +1,60 @@
-# Contrato da API (snapshot verificado)
+# Contrato HTTP e Socket.IO (estado observado)
 
-Referência do backend, não garantia de estabilidade futura. Reconfirme `src/routes/apiRoutes.js`, os módulos de rota e controllers ao alterar um contrato. Prefixo: `/api/reaproveitafranca`.
+Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.js`. Confirme middleware e controller antes de mudar ou integrar um contrato. Prefixo REST: `/api/reaproveitafranca`.
 
-## HTTP, autenticação e respostas
+## Convenções
 
-- JWT é verificado por `src/middlewares/verifyJWT.js`; aceita `Bearer <token>` ou token cru e define `req.userId`, `req.role`, `req.userName`.
-- Não deduza autenticação pelo método HTTP: confirme o middleware de cada rota.
-- Respostas de erro normalmente usam `{ error: "..." }`; sucesso varia por endpoint.
-- IDs enviados/retornados pela API são UUID em string; no banco são `BINARY(16)`.
+- `verifyJWT` aceita Bearer ou token cru; injeta `req.userId`, `req.role`, `req.userName`.
+- Respostas de erro geralmente têm `{ error: "..." }`; sucesso varia por endpoint.
+- UUIDs públicos são strings; o banco armazena IDs como `BINARY(16)`.
+- Não deduza autenticação pelo verbo HTTP. A tabela abaixo resume somente a montagem da rota; confirme ownership e validações no controller.
 
 ## Rotas montadas
 
-| Método | Caminho após prefixo | Acesso conforme rota | Comportamento confirmado |
+| Módulo | Método e caminho após prefixo | Acesso na rota | Observação confirmada |
 |---|---|---|---|
-| POST | `/user/create` | Público; rate limit global | Cadastro de usuário, multipart com campo opcional `photo` e envio de OTP. |
-| POST | `/user/create/empresa` | Público; rate limit global | Cadastro de empresa com CPF/CNPJ, endereço e envio de OTP. |
-| POST | `/user/login` | Público; limitador de autenticação | Login com o payload verificado pelo controller. |
-| POST | `/user/login/google` | Público; limitador de autenticação | Login Google. |
-| GET/POST | `/user/login/linkedin[/callback]` | Público; limitador de autenticação | URL/callback LinkedIn. |
-| POST | `/user/password/forgot` | Público; limitador de autenticação | Solicitação de recuperação por e-mail. |
-| POST | `/user/password/reset` | Público | Redefinição de senha; valide o token/contrato no controller. |
-| PUT/DELETE/GET | `/user/:id` | JWT | Atualizar, excluir ou consultar usuário; controller verifica dono/admin conforme operação. |
-| PATCH | `/user/password` | JWT | Alterar senha autenticada. |
-| PATCH | `/user/password/first-access` | JWT | Definir senha no primeiro acesso. |
-| POST | `/user/create/admin` | JWT + papel admin | Criar administrador. |
-| GET | `/user/`, `/user/search/:name` | JWT + papel admin | Listar/pesquisar usuários. |
-| POST | `/otp/enviar` | Sem JWT na rota | Enviar OTP para o ID informado; cooldown em memória de 30 s por usuário. |
-| POST | `/otp/verificar` | Sem JWT na rota | Verificar `{ id, code }` e ativar conta. |
-| GET | `/product/`, `/product/:id` | Público | Listar produtos ou consultar produto por UUID. |
-| POST | `/product/create` | JWT | Criar produto; dono é derivado de `req.userId`. Venda requer preço; doação não aceita preço. |
-| PUT/DELETE | `/product/:id` | JWT | Atualizar/excluir produto. O controller atual não demonstra verificação de propriedade do produto. |
-| POST | `/localization/` | Validador; sem JWT explícito na rota | Criar localização com `userId`, CEP e endereço. |
-| POST/GET/GET by id/PUT/DELETE | `/log/`, `/log/:id` | Sem JWT explícito na rota | CRUD de log sem controle de acesso de rota. Não exponha a clientes sem revisão. |
-| POST | `/document/` | JWT + limitador global | Registra CPF/CNPJ cifrado; payload `{ userId, docType, doc }`. O controller não vincula `userId` ao JWT. |
-| GET | `/document/user/:userId` | JWT + limitador global | Lista metadados de documentos do usuário indicado; a rota atual não verifica propriedade. |
-| GET | `/document/:id/decrypt` | JWT + papel admin | Retorna o documento descriptografado. |
-| GET | `/document/:id` | JWT + limitador global | Retorna metadados (ID, usuário e tipo), sem documento em claro. |
-| DELETE | `/document/:id` | JWT + papel admin | Exclui documento. |
+| user | `POST /user/create` | Público + limitador global | Cadastro, upload opcional `photo`, papel forçado pelo endpoint, OTP |
+| user | `POST /user/create/empresa` | Público + limitador global | Cadastro de empresa |
+| user | `POST /user/login` | Público + limitador de autenticação | Login local |
+| user | `POST /user/login/google` | Público + limitador de autenticação | Login Google |
+| user | `GET /user/login/linkedin`, `GET/POST /user/login/linkedin/callback` | Público + limitador de autenticação | URL/callback LinkedIn |
+| user | `POST /user/password/forgot` | Público + limitador de autenticação | Recuperação por e-mail |
+| user | `POST /user/password/reset` | Público | Redefinição; conferir contrato/token no controller |
+| user | `PUT/DELETE/GET /user/:id` | JWT | Controller aplica verificações conforme operação |
+| user | `PATCH /user/password`, `PATCH /user/password/first-access` | JWT | Alteração de senha |
+| user | `POST /user/create/admin`, `GET /user/`, `GET /user/search/:name` | JWT + admin | Ordem do middleware em `userRoutes.js` é significativa |
+| otp | `POST /otp/enviar`, `POST /otp/verificar` | Sem JWT explícito | Envio e validação de OTP; cooldown documentado em memória |
+| product | `GET /product/`, `GET /product/:id` | Público | Lista/consulta de produto |
+| product | `POST /product/create` | JWT | Cria produto; fotos via multipart `photos` |
+| product | `PUT/DELETE /product/:id` | JWT | Atualiza/remove; confira autorização por propriedade no controller |
+| product | `POST /product/:id/photos` | JWT | Adiciona várias fotos, multipart `photos` |
+| product | `PUT /product/photos/:photoId` | JWT | Atualiza foto, multipart `photo` |
+| product | `DELETE /product/photos/:photoId` | JWT | Remove foto |
+| shopping | `POST /shopping/create` | JWT | Cria compra com `items` (produto UUID e quantidade positiva); baixa estoque dentro de transação |
+| shopping | `GET /shopping/` | JWT | Lista compras do usuário; admin recebe listagem geral |
+| shopping | `GET /shopping/:id` | JWT | Detalhe; controller restringe ao comprador ou admin |
+| shopping | `PATCH /shopping/:id/cancel` | JWT | Cancela compra pendente; controller restringe comprador/admin |
+| shopping | `PATCH /shopping/:id/status` | JWT | Atualiza para status permitido; não há restrição de papel/ownership explícita no controller atual |
+| shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
+| shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
+| shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
+| localization | `POST /localization/` | Validador; sem JWT explícito | Cria localização |
+| log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
+| document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
+| document | `GET /document/:id/decrypt`, `DELETE /document/:id` | JWT + admin | Descriptografar/excluir documento |
 
-O middleware de admin em `userRoutes.js` é posicional: rotas após `router.use(roleMiddleware(['admin']))` são administrativas. Preserve a ordem ao incluir rotas.
+Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não derive contrato detalhado apenas desta tabela.
 
 ## Socket.IO
 
-- `src/sockets/chatSocket.js` registra `join_conversation`; o socket entra na sala com o identificador recebido.
-- Não há autenticação no handshake, validação de UUID/participante, envio de mensagem ou emissão de notificação implementados na revisão atual da `main`.
-- CORS está fixado em `http://localhost:3000` em `src/server.js`; alinhe com o ambiente antes de integrar outro cliente.
+- `src/sockets/chatSocket.js` registra `join_conversation`; o ID recebido é usado para entrar na sala.
+- Não há autenticação no handshake, validação de UUID/participante, evento de envio/persistência de mensagem ou notificação nesta revisão documentada.
+- HTTP e Socket.IO em `src/server.js` configuram origem CORS `http://localhost:3000`.
 
-## Lacunas de contrato
+## Lacunas relevantes
 
-- O schema contém compras, pagamentos, disputas, reviews, impacto ambiental e notificações, mas não há controllers/rotas REST correspondentes no inventário atual.
-- Os tipos de notificação existem apenas no enum do schema; não há eventos de domínio ativos para dispará-los nesta revisão da `main`.
-- Rotas de listagem e metadados de documentos exigem JWT, mas não comprovam propriedade do registro; confira autorização antes de expor esses dados a clientes.
-- Confira validações e respostas diretamente no controller; esta tabela resume e não substitui o contrato do código.
+- Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
+- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há contratos REST correspondentes no inventário atual.
+- Tabela/enum `notification` não significa controller, rota ou gatilho existente.
+- Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
+- Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).

@@ -1,62 +1,53 @@
-ME SPONDA SEMPRE EM PT-BR
-não commite nada e não de push em nada sem minha permissão
-bm sempre quando for perguntar, fale em pt-br
-não commite e de push no arquivo "AGENTS.MD"
-siga o padão de projeto
-# AGENTS.md
+# Instruções para agentes — backend Reaproveita Franca
 
-REST backend for Reaproveita Franca: Node.js (CommonJS) + Express 4 + MySQL 8 + Socket.IO. No TypeScript, no build step.
+## Regras obrigatórias
 
-## Run and verify
+- Responda sempre em português brasileiro, inclusive perguntas e relatórios.
+- Não faça commit nem push sem autorização explícita. Não edite os projetos irmãos `FrontEnd-RF/` e `Mobile-RF/` em tarefas restritas ao backend.
+- Siga o padrão existente e mantenha alterações no escopo pedido. Não implemente requisitos futuros só porque aparecem no TCC, schema ou documentação.
+- Nunca exponha ou registre segredos, tokens ou dados pessoais reais. Nunca armazene CPF/CNPJ em texto puro.
+- Não execute `src/mysql-init/RFScript.sql` em banco com dados importantes: o script remove e recria `Reaproveita_Franca`.
 
-- Requires a `.env` at the repo root and a running MySQL 8 instance. `dotenv-safe` loads it at `require` time and **fails startup** if `.env` is missing or lacks any key present in `.env.example`. Add new keys to **both** files.
-- `DOCUMENT_ENC_KEY` and `DOCUMENT_HMAC_KEY` must each be 64 hex chars (32 bytes); generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
-- `npm install` then `npm start` (runs `node --watch src/server.js`). `npm run start:dev` requires a **globally installed** `nodemon` — it is not in `package.json`.
-- Server listens on `process.env.PORT` or `5000`. All API routes are under `/api/reaproveitafranca` (e.g. `/api/reaproveitafranca/user/login`).
-- There are **no tests, lint, typecheck, or build scripts/configs**. Do not invent commands; verify changes with real HTTP requests. Socket.IO can be exercised with `src/sockets/test/socket-test.html` (expects port 5000).
-- The app still boots if MySQL is unreachable; `testConnect()` only logs the failure.
+## Orientação rápida
 
-## Architecture
+- Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
+- `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
+- Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
+- Não há suíte permanente de testes, lint, typecheck ou build. Não invente comandos; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 
-- `src/server.js` creates the HTTP server and Socket.IO; `src/index.js` builds the Express app, mounts routes, and runs the DB connectivity check.
-- Request flow: `src/routes/modules/*` → `src/controllers/*` → `src/services/*` → `src/db/connect.js` (a shared `mysql2` pool). `userController.js` is the exception: it queries the pool directly instead of using a service.
-- All user-facing messages are in Portuguese. Controllers return `{ error: "..." }` on failure and `{ message, ... }` on success — keep that shape.
-- `src/services/userServices.js` and `src/middlewares/verifyUuid.js` are unused legacy helpers; don't extend them expecting they are wired up.
-- Socket.IO only implements chat rooms (`join_conversation`); there is no socket authentication and clients can join any conversation id.
+## Fluxo de trabalho do agente
 
-## Database
+1. Entenda o objetivo, o escopo e as evidências esperadas. Faça perguntas em pt-BR se uma decisão de negócio, segurança ou contrato bloquear o trabalho.
+2. Consulte [`docs/README.md`](docs/README.md) e abra os guias relevantes à tarefa; não carregue toda a documentação sem necessidade.
+3. Inspecione o código e o schema atuais. Prioridade: implementação executável → schema/configuração → documentação → hipótese. Não trate documentação como garantia de que o código não mudou.
+4. Siga o fluxo rotas → controllers → services → banco quando adequado. Converta UUID na fronteira e preserve formatos de resposta existentes.
+5. Faça a menor mudança que atenda ao pedido. Não amplie APIs, dependências ou regras de negócio sem necessidade e autorização.
+6. Verifique proporcionalmente à mudança, revise segurança e diff, e informe comandos/resultados e o que não foi testado.
 
-- Full schema: `src/mysql-init/RFScript.sql`. **It starts with `DROP DATABASE IF EXISTS Reaproveita_Franca`** — never run it against a database whose data matters.
-- `src/mysql-init/migration_social_login.sql` is the additive migration for databases created before Google/LinkedIn login (makes `password`/`cellphone` nullable and adds `google_id`/`linkedin_id`).
-- No migration framework or ORM is used. Schema changes are hand-written SQL applied manually, in order.
-- Reserved words `user`, `table`, and `read` are always backticked in SQL.
-- All primary keys are `BINARY(16)` UUIDv7. Convert at the boundary: use `utils/uuid.toBin()` for query params and `BIN_TO_UUID(col) AS col` in `SELECT`s. Never pass raw UUID strings into `BINARY(16)` columns.
-- User statuses: `awaitingForEmail` (default on signup, activated by OTP), `firstLogin` (admin created with generated password), `active`, `inactive`.
-- CPF/CNPJ are never stored in plaintext: `document.doc_hmac` (HMAC-SHA256) is used for duplicate checks and `doc_enc`/`doc_iv`/`doc_tag` hold AES-256-GCM ciphertext. Reuse `services/docService.js`, not raw queries. Rotating the env keys makes existing rows undecryptable and breaks dedupe.
+## Arquitetura e pontos de atenção
 
-## Auth, middleware, and quotas
+- `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
+- `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
+- Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
+- Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- `src/server.js` fixa CORS em `http://localhost:3000`.
+- `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
+- O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
+- As camadas de autorização de compras, itens de compra, documentos, logs, localização e propriedade de produto têm lacunas descritas em [`docs/security-privacy.md`](docs/security-privacy.md). Não as amplie inadvertidamente.
 
-- JWTs last 8h and are signed with `SECRET`; `verifyJWT` accepts either a raw token or `Bearer <token>` and sets `req.userId`, `req.role`, `req.userName`.
-- Ordering in `src/routes/modules/userRoutes.js` is positional and easy to break: everything after `router.use(verifyJWT)` requires auth, and everything after `router.use(roleMiddleware(['admin']))` is admin-only. Put new routes in the correct block.
-- Signup routes run `forceUserRole`, which deletes `req.body.role`; role is derived from the endpoint, so client-supplied roles are ignored by design.
-- `globalLimiter` applies to all `/user` routes (100 req/15 min); `authLimiter` applies to login/password-forgot (5 req/15 min). Repeated manual login attempts will return 429. OTP resend also has an in-memory 30 s per-user cooldown.
-- CORS origins are hardcoded to `http://localhost:3000` in `src/server.js`. `FRONTEND_URL` is used only to build the password-reset link.
+## Banco, autenticação e dados
 
-## Known gotchas
+- Schema: `src/mysql-init/RFScript.sql`; migração aditiva social: `src/mysql-init/migration_social_login.sql`. Não há framework de migração.
+- PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
+- Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
+- JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.
+- CPF/CNPJ: reutilize `src/services/docService.js`; chaves `DOCUMENT_ENC_KEY` e `DOCUMENT_HMAC_KEY` são hexadecimais de 64 caracteres. Rotacioná-las pode tornar dados existentes ilegíveis e quebrar deduplicação.
+- A ordem dos middlewares em `src/routes/modules/userRoutes.js` é significativa: rotas abaixo de `verifyJWT` exigem JWT; abaixo do middleware admin exigem papel admin.
 
-- `src/index.js` requires `./db/testConnect`, but the file is `src/db/testconnect.js`. This works on Windows/macOS but **fails on case-sensitive filesystems (Linux/CI)**. If you touch startup, fix the casing.
-- `src/cron.js` is commented out in `src/index.js` and calls an undefined `cleanUpMessages`; enabling it as-is will crash. The cleanup service was never implemented.
-- `productService` expects already-converted binary IDs from controllers; keep conversions in controllers for product routes.
-- Git history/branches use Conventional Commit messages (`feat(api): ...`, `fix(database): ...`) and `feature/<owner>/<scope>` branches merged into `main` via PRs.
+## Documentação
 
-## Documentação do repositório
-
-- Comece por [`docs/README.md`](docs/README.md) para ver a ordem recomendada de leitura e o mapa da documentação.
-- [`docs/architecture.md`](docs/architecture.md): arquitetura, camadas, inicialização e banco de dados.
-- [`docs/api-contract.md`](docs/api-contract.md): rotas, autenticação, eventos Socket.IO e lacunas conhecidas.
-- [`docs/product.md`](docs/product.md): contexto do produto e status verificado das funcionalidades.
-- [`docs/security-privacy.md`](docs/security-privacy.md): autenticação, dados pessoais e riscos de autorização.
-- [`docs/quality.md`](docs/quality.md): verificações disponíveis e roteiro de testes.
-- [`docs/agent-workflow.md`](docs/agent-workflow.md) e [`docs/feature-readiness.md`](docs/feature-readiness.md): fluxo de trabalho e evidências para declarar conclusão.
-- [`docs/integration-workflow.md`](docs/integration-workflow.md), [`docs/decisions.md`](docs/decisions.md) e [`docs/adr/README.md`](docs/adr/README.md): integração entre aplicações e decisões técnicas.
-Considere os documentos como referências da implementação observada. Se houver divergência, confira rotas, controllers, services e schema atuais antes de assumir que a documentação está atualizada.
+- Índice e mapa por tarefa: [`docs/README.md`](docs/README.md).
+- Contrato observado: [`docs/api-contract.md`](docs/api-contract.md); arquitetura: [`docs/architecture.md`](docs/architecture.md).
+- Fluxo de agentes e evidências: [`docs/agent-workflow.md`](docs/agent-workflow.md), [`docs/feature-readiness.md`](docs/feature-readiness.md), [`docs/quality.md`](docs/quality.md).
+- Segurança, produto, localização, integração e decisões: consulte os links no índice.
+- Ao mudar comportamento confirmado, atualize os documentos afetados. Preserve desconhecidos como desconhecidos e não documente credenciais ou dados pessoais.

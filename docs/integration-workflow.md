@@ -1,26 +1,23 @@
-# Fluxo de integração entre repositórios
+# Integração da API com clientes
 
-O workspace Reaproveita Franca contém aplicações independentes. Não suponha dependências, build, publicação ou CI unificados.
+O workspace contém aplicações independentes, com repositórios, dependências e processos próprios. Esta tarefa documental cobre só o backend; não altere `FrontEnd-RF/` ou `Mobile-RF/` sem autorização específica.
 
-| Aplicação | Projeto | Stack observada | Limite nesta tarefa |
-|---|---|---|---|
-| Web | `FrontEnd-RF/` | React, TypeScript, Vite | Leitura para verificar contrato; não editar em tarefa backend. |
-| API | `backend-RF/` | Node.js, Express, MySQL, Socket.IO | Alterável quando esta for a tarefa autorizada. |
-| Mobile | `Mobile-RF/` | Expo/React Native | Leitura para integração; seguir as instruções próprias antes de qualquer edição. |
+## Antes de mudar contrato
 
-## Mudança de contrato
+1. Confirme rota/evento em `apiRoutes.js`, módulo de rotas e middleware.
+2. Confirme auth, papel, ownership, validação, status/resposta no controller e efeitos no service/DB/socket.
+3. Confira schema e formatos de UUID/datas.
+4. Atualize `api-contract.md` apenas para comportamento observado.
+5. Informe clientes impactados com método/path ou evento, token, payload, resposta e erros.
+6. Exercite integração ponta a ponta quando ambiente e cliente estiverem disponíveis; declare o que não foi coberto.
 
-1. Confirme rota real, auth, ownership, validação, status HTTP, formato e efeitos no banco/socket.
-2. Atualize `docs/api-contract.md` somente com comportamento verificado.
-3. Informe clientes afetados: método/path, token, payload, respostas, eventos e erros.
-4. Não implemente compra, pagamento ou outra regra só porque há tabela no schema ou requisito no TCC.
-5. Teste ponta a ponta quando o ambiente estiver disponível e descreva explicitamente o que não foi exercitado.
+Não crie contrato porque existe tabela no schema ou porque um cliente parece esperar determinada operação. Mudança em backend não autoriza edição automática do cliente.
 
-## Integração do chat/notificações
+## Chat e notificações
 
-- Socket.IO usa origem fixa `http://localhost:3000` no servidor atual.
-- Na revisão atual da `main`, não há autenticação Socket.IO, evento `send_message` ou evento de notificação implementados.
-- O único evento atual é `join_conversation`, que adiciona o socket à sala pelo ID fornecido sem validar identidade ou participação; não o use para dados privados sem revisão de segurança.
-- O schema contém tabela `notification`, mas ela ainda não possui rota/serviço nesta revisão.
+- Origem CORS fixa em `http://localhost:3000` no servidor observado.
+- Socket.IO implementa apenas `join_conversation`, que coloca socket na sala pelo ID recebido, sem auth ou validação de participante.
+- Não há evento de envio de mensagem nem evento/gatilho de notificação documentado.
+- Tabela `notification` não é uma API.
 
-Não atualize clientes com contratos hipotéticos. Se o contrato mudar, descreva a atualização necessária nos projetos consumidores, sem editar os repositórios irmãos sem autorização.
+Não conecte dados privados a esse socket sem resolver autenticação e autorização no servidor.
