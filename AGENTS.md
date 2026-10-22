@@ -39,7 +39,7 @@
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migração aditiva social: `src/mysql-init/migration_social_login.sql`. Não há framework de migração.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql` e `migration_mercado_pago.sql`. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
 - JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.
