@@ -47,9 +47,11 @@ src/
 - O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.
 - A tabela `conversation_participant` e tabelas de domínio não demonstram fluxos REST/socket implementados.
 
-## Estado de chat e agendamentos
+## Chat e notificações
 
-O socket atual só trata `join_conversation`; não autentica conexão, valida participante, envia ou persiste mensagens. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
+`notificationSocket.js` verifica JWT para adicionar o usuário à sala `user:<uuid>`. `send_message` exige identidade autenticada, confere participação em `conversation_participant`, persiste a mensagem e atualiza a conversa e o último item lido do remetente. Cada outro participante recebe `new_message` e uma notificação `nova_mensagem` persistida.
+
+`join_conversation` continua permitindo entrar em uma sala pelo ID informado sem autenticação/validação de participação; não trate o canal da conversa como privado até essa lacuna ser resolvida. Cadastro e ativação por OTP também geram notificações `sistema`. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
 
 ## Riscos de compatibilidade
 

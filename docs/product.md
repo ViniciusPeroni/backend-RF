@@ -14,7 +14,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 - Compras podem ser criadas com itens; serviço verifica disponibilidade/estoque e atualiza estoque dentro de transação. Cancelamento/restauração e atualização de status também têm endpoints.
 - Categorias e estados do produto são enums do schema; consulte `RFScript.sql` e controller antes de adicionar valor.
 - CPF/CNPJ não são armazenados em claro: HMAC para deduplicação e cifra AES-256-GCM.
-- Schema tem conversas e mensagens, mas socket atual apenas coloca cliente em sala; sem fluxo de mensagem completo.
+- O envio de mensagens via Socket.IO persiste a mensagem e notifica os demais participantes; a entrada `join_conversation` ainda não valida participação.
 
 ## Estado resumido
 
@@ -28,9 +28,9 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Localização | POST montado com validador | Rota presente; sem JWT explícito na montagem atual |
 | Logs | CRUD montado | Rota presente sem JWT explícito; não presumir seguro para exposição pública |
 | Documentos | Rotas JWT/admin | Há operações; revisão de ownership necessária para criação/listagens/metadados |
-| Chat | `join_conversation` | Entrada em sala por ID, sem auth/participação, envio ou persistência de mensagens |
-| Notificações | Tabela/enum no schema | Sem rota/gatilho correspondente documentado nesta revisão |
-| Negociação | Não há fluxo de negociação confirmado | Não afirmar negociação implementada |
+| Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; `join_conversation` ainda não valida participação |
+| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD e contagem disponíveis; gatilhos atuais para mensagem, cadastro e OTP |
+| Reserva/negociação | Tabelas e parte do fluxo de compra | Não há gatilhos de notificação de reserva/aceite/recusa conectados |
 | Pagamento/comissão | Tabelas, sem integração/rotas correspondentes | Não afirmar pagamento disponível |
 | Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |

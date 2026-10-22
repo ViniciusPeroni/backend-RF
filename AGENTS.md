@@ -28,7 +28,8 @@
 
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
-- Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
+- `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` também exige usuário autenticado e participante na conversa. `join_conversation` continua sem validação de identidade/participação, então não trate a sala como protegida.
+- Notificações automáticas atuais: mensagem nova, cadastro de conta e ativação por OTP. Gatilhos de compra/reserva, pagamento, review e disputa ainda dependem dos respectivos fluxos.
 - Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.

@@ -27,7 +27,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 
 ### Socket.IO e provedores externos
 
-- A página `src/sockets/test/socket-test.html` pode ajudar no teste manual de conexão, mas o evento atualmente documentado não autentica nem valida participação.
+- A página `src/sockets/test/socket-test.html` testa somente conexão e `join_conversation`; ela não testa o handshake autenticado, `send_message` ou notificações.
 - Separe comportamento simulado de entrega SMTP/OAuth real; não reporte integração externa sem evidência do provedor.
 - Não conecte teste a dados pessoais ou produção.
 

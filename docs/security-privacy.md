@@ -24,7 +24,10 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 
 ## Socket.IO
 
-No estado observado, não há auth no handshake nem validação de participante. `join_conversation` aceita ID recebido para entrada na sala. Isso pode expor dados privados quando houver eventos nessa sala; não trate como chat seguro de produção.
+- O handshake usa JWT para a sala individual `user:<uuid>`; a conexão anônima ainda pode ser estabelecida, mas não é associada a uma sala de usuário.
+- `send_message` exige JWT válido e valida participação usando `conversation_participant` antes de gravar.
+- `join_conversation` ainda aceita qualquer ID sem autenticação ou validação de participante. Isso pode expor eventos privados da sala; não trate esse evento como seguro.
+- Mensagens/notificações direcionadas a usuários são emitidas para as salas individuais. Não envie tokens em URLs; prefira `auth: { token }` no handshake.
 
 ## Configuração e riscos operacionais
 
