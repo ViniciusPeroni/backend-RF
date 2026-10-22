@@ -260,10 +260,143 @@ const deleteProduct = async (req, res) => {
 };
 
 
+const addPhotos = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!uuid.isValid(id)) {
+            return res.status(400).json({
+                error: "ID do produto inválido."
+            });
+        }
+
+        const photos = extractPhotos(req);
+
+        if (!photos || photos.length === 0) {
+            return res.status(400).json({
+                error: "Nenhuma foto foi enviada."
+            });
+        }
+
+        const added = await productService.addPhotos(
+            uuid.toBin(id),
+            photos
+        );
+
+        if (!added) {
+            return res.status(404).json({
+                error: "Produto não encontrado."
+            });
+        }
+
+        return res.status(201).json({
+            message: "Foto(s) adicionada(s) com sucesso.",
+            photos: added
+        });
+
+    } catch (error) {
+        console.error("Erro em addPhotos:", error);
+
+        return res.status(500).json({
+            error: "Erro ao adicionar foto(s)."
+        });
+    }
+};
+
+
+const updatePhoto = async (req, res) => {
+    try {
+        const { photoId } = req.params;
+
+        if (!uuid.isValid(photoId)) {
+            return res.status(400).json({
+                error: "ID da foto inválido."
+            });
+        }
+
+        let photoBuffer = req.file ? req.file.buffer : null;
+        if (!photoBuffer && req.body && req.body.photo) {
+            if (Buffer.isBuffer(req.body.photo)) {
+                photoBuffer = req.body.photo;
+            } else if (typeof req.body.photo === "string" && req.body.photo.trim()) {
+                const base64Data = req.body.photo.replace(/^data:image\/\w+;base64,/, "");
+                photoBuffer = Buffer.from(base64Data, "base64");
+            }
+        }
+
+        if (!photoBuffer) {
+            return res.status(400).json({
+                error: "Nenhuma foto foi enviada para atualização."
+            });
+        }
+
+        const updated = await productService.updatePhoto(
+            uuid.toBin(photoId),
+            photoBuffer
+        );
+
+        if (!updated) {
+            return res.status(404).json({
+                error: "Foto não encontrada."
+            });
+        }
+
+        return res.status(200).json({
+            message: "Foto atualizada com sucesso.",
+            photo: updated
+        });
+
+    } catch (error) {
+        console.error("Erro em updatePhoto:", error);
+
+        return res.status(500).json({
+            error: "Erro ao atualizar foto."
+        });
+    }
+};
+
+
+const deletePhoto = async (req, res) => {
+    try {
+        const { photoId } = req.params;
+
+        if (!uuid.isValid(photoId)) {
+            return res.status(400).json({
+                error: "ID da foto inválido."
+            });
+        }
+
+        const deleted = await productService.deletePhoto(
+            uuid.toBin(photoId)
+        );
+
+        if (!deleted) {
+            return res.status(404).json({
+                error: "Foto não encontrada."
+            });
+        }
+
+        return res.status(200).json({
+            message: "Foto excluída com sucesso."
+        });
+
+    } catch (error) {
+        console.error("Erro em deletePhoto:", error);
+
+        return res.status(500).json({
+            error: "Erro ao excluir foto."
+        });
+    }
+};
+
+
 module.exports = {
     createProduct,
     getProducts,
     getProductById,
     updateProduct,
-    deleteProduct
+    deleteProduct,
+    addPhotos,
+    updatePhoto,
+    deletePhoto
 };

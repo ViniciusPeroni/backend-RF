@@ -249,6 +249,77 @@ const productService = {
         );
 
         return result.affectedRows > 0;
+    },
+
+
+    async addPhotos(productId, photos) {
+        const [products] = await connect.promise().query(
+            `SELECT id FROM product WHERE id = ?`,
+            [productId]
+        );
+
+        if (products.length === 0) {
+            return null;
+        }
+
+        const insertedPhotos = [];
+        for (const photoBuffer of photos) {
+            const photoId = uuid.generateId();
+            await connect.promise().query(
+                `INSERT INTO product_photo (id, photo, id_product)
+                 VALUES (?, ?, ?)`,
+                [uuid.toBin(photoId), photoBuffer, productId]
+            );
+
+            insertedPhotos.push({
+                id: photoId,
+                photo: photoBuffer.toString("base64")
+            });
+        }
+
+        return insertedPhotos;
+    },
+
+
+    async updatePhoto(photoId, photoBuffer) {
+        const [result] = await connect.promise().query(
+            `UPDATE product_photo
+             SET photo = ?
+             WHERE id = ?`,
+            [photoBuffer, photoId]
+        );
+
+        if (result.affectedRows === 0) {
+            return null;
+        }
+
+        const [rows] = await connect.promise().query(
+            `SELECT BIN_TO_UUID(id) AS id, BIN_TO_UUID(id_product) AS id_product, photo
+             FROM product_photo
+             WHERE id = ?`,
+            [photoId]
+        );
+
+        if (rows.length === 0) {
+            return null;
+        }
+
+        return {
+            id: rows[0].id,
+            id_product: rows[0].id_product,
+            photo: rows[0].photo ? rows[0].photo.toString("base64") : null
+        };
+    },
+
+
+    async deletePhoto(photoId) {
+        const [result] = await connect.promise().query(
+            `DELETE FROM product_photo
+             WHERE id = ?`,
+            [photoId]
+        );
+
+        return result.affectedRows > 0;
     }
 
 };
