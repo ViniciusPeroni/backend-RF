@@ -1,0 +1,31 @@
+# Reaproveita Franca — API Backend
+
+> API REST para a plataforma Reaproveita Franca, construída com Node.js, Express, MySQL e Socket.IO.
+
+Este repositório contém somente o backend. O frontend web e o aplicativo móvel são projetos independentes. Não trate o workspace como monorepo nem altere os projetos irmãos em uma tarefa limitada ao backend.
+
+## Ordem de leitura
+
+1. [AGENTS.md](AGENTS.md) — regras do repositório e configuração local.
+2. [docs/architecture.md](docs/architecture.md) — stack, camadas, inicialização e banco.
+3. [docs/api-contract.md](docs/api-contract.md) — rotas realmente montadas, autenticação e limites conhecidos.
+4. [docs/product.md](docs/product.md) — contexto do TCC e distinção entre schema e funcionalidades disponíveis.
+5. [docs/security-privacy.md](docs/security-privacy.md) — JWT, dados pessoais, documentos e Socket.IO.
+6. [docs/quality.md](docs/quality.md) — verificações existentes e roteiro de testes manuais.
+7. [docs/agent-workflow.md](docs/agent-workflow.md) e [docs/feature-readiness.md](docs/feature-readiness.md) — execução de tarefas e evidências de conclusão.
+8. [docs/localization.md](docs/localization.md) — mensagens, UUIDs, datas e SQL.
+9. [docs/integration-workflow.md](docs/integration-workflow.md), [docs/decisions.md](docs/decisions.md) e [docs/adr/README.md](docs/adr/README.md) — integração, decisões e ADRs.
+
+## Resumo técnico
+
+- CommonJS, JavaScript, Node.js, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
+- Inicialização: `npm start`; prefixo REST: `/api/reaproveitafranca`.
+- Conexão MySQL: `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`.
+- Chaves CPF/CNPJ: `DOCUMENT_ENC_KEY` e `DOCUMENT_HMAC_KEY`, ambas com 64 caracteres hexadecimais.
+- Não há scripts configurados de teste, lint, build ou typecheck. Não invente comandos; registre os testes HTTP/Socket.IO realmente executados.
+- Schema completo em `src/mysql-init/RFScript.sql`; o script apaga e recria o banco `Reaproveita_Franca`.
+- `shopping`, `payment`, `dispute`, `review` e outras tabelas existem no schema, mas não implicam que seus fluxos REST estejam implementados.
+
+## Fonte da verdade
+
+Prefira as rotas, controllers, services e SQL atuais a comentários ou documentação desatualizados. Na `main` atual, o Socket.IO implementa apenas `join_conversation`, sem autenticação ou envio de mensagens. A tabela `notification` existe no schema, mas não há controller/rota de notificações nesta revisão. Confirme o código antes de declarar qualquer fluxo como implementado. Nunca documente credenciais, tokens reais ou dados pessoais.
