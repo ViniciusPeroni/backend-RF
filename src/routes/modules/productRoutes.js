@@ -3,6 +3,7 @@ const router = require("express").Router();
 const productController = require("../../controllers/productController");
 
 const verifyJWT = require("../../middlewares/verifyJWT");
+const upload = require("../../middlewares/upload");
 
 // ======================================================
 // -------- ROTAS PÚBLICAS
@@ -20,12 +21,14 @@ router.get("/:id", productController.getProductById);
 router.post(
     "/create",
     verifyJWT,
+    upload.array("photos"),
     productController.createProduct
 );
 
 router.put(
     "/:id",
     verifyJWT,
+    upload.array("photos"),
     productController.updateProduct
 );
 
