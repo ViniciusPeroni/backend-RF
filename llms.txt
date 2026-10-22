@@ -1,0 +1,40 @@
+# Reaproveita Franca — backend API
+
+> API em Node.js/CommonJS, Express 4, MySQL 8 e Socket.IO. Este repositório é independente dos projetos web e mobile.
+
+## Instruções para agentes
+
+- Regras obrigatórias e resumo: [AGENTS.md](AGENTS.md).
+- Navegação por tarefa: [docs/README.md](docs/README.md).
+- Operação do agente principal/especialistas: [docs/agent-workflow.md](docs/agent-workflow.md).
+- Escopo permitido aqui: backend. Não altere projetos irmãos sem autorização específica.
+- Responda em pt-BR. Não faça commit/push sem autorização. Não imprima segredos ou PII.
+
+## Fontes de verdade
+
+1. Código executável atual (rotas, middleware, controllers, services e sockets).
+2. Schema/configuração efetivos.
+3. Documentação deste repositório.
+4. Requisitos e hipóteses — nunca os trate como implementação.
+
+## Referências essenciais
+
+- [Arquitetura](docs/architecture.md)
+- [Contrato API](docs/api-contract.md)
+- [Produto e estado das capacidades](docs/product.md)
+- [Segurança e privacidade](docs/security-privacy.md)
+- [Qualidade/verificação](docs/quality.md) e [prontidão](docs/feature-readiness.md)
+- [Localização/formato](docs/localization.md)
+- [Integração](docs/integration-workflow.md), [decisões](docs/decisions.md), [ADRs](docs/adr/README.md)
+
+## Resumo técnico
+
+- Inicialização: `npm start`; HTTP em `PORT` ou `5000`; prefixo `/api/reaproveitafranca`.
+- `.env.example` lista variáveis. A inicialização tenta `dotenv-safe`, captura falha e recorre a `dotenv`; confirme o comportamento real antes de afirmar que variáveis ausentes impedem boot.
+- Não há scripts permanentes de teste, lint, build ou typecheck.
+- Schema: `src/mysql-init/RFScript.sql` é destrutivo (`DROP DATABASE`). Nunca execute com dados importantes.
+- IDs UUIDv7 são `BINARY(16)` no MySQL. CPF/CNPJ passam por HMAC e AES-256-GCM.
+- Compras e itens têm rotas REST; endpoints de atualização de status e consulta de itens têm lacunas de ownership descritas nos guias de segurança.
+- Na revisão observada, Socket.IO só implementa `join_conversation`, sem autenticação/validação de participação. A tabela `notification` não tem rota/serviço documentado.
+
+Não use exemplos com credenciais, tokens, CPF/CNPJ, endereço ou dados pessoais reais. Confira a implementação antes de atualizar este resumo.

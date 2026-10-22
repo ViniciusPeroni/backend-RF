@@ -55,6 +55,8 @@ CREATE TABLE localization (
     number         VARCHAR(6) NOT NULL,
     city           VARCHAR(100) NOT NULL,
     state        CHAR(2) NOT NULL, -- sigla do estado (ex: SP)
+    latitude       DECIMAL(10,8) NULL,
+    longitude      DECIMAL(11,8) NULL,
     id_user        BINARY(16) NOT NULL,
     KEY `idx_localization_user` (`id_user`),
     CONSTRAINT `fk_localization_user`   
@@ -123,24 +125,12 @@ CREATE TABLE shopping(
 --  depois, via ALTER TABLE, pois dependem de `message`)
 -- =====================================================================
 DROP TABLE IF EXISTS conversation;
-CREATE TABLE conversation(
-    id                  BINARY(16) primary key,
-    created_in          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_in          DATETIME NULL,
-    read_by_a_until     BINARY(16) NULL,
-    read_by_b_until     BINARY(16) NULL,
-    id_user_a           BINARY(16) NOT NULL,
-    id_user_b           BINARY(16) NOT NULL,
-    id_last_message     BINARY(16) NULL,
-    UNIQUE KEY `uq_conversation_user_pair` (`id_user_a`, `id_user_b`),
-    KEY `idx_conversation_user_a` (`id_user_a`),
-    KEY `idx_conversation_user_b` (`id_user_b`),
-    CONSTRAINT `fk_conversation_user_a`
-        FOREIGN KEY (id_user_a) REFERENCES user(id)
-        ON DELETE RESTRICT ON UPDATE CASCADE,
-    CONSTRAINT `fk_conversation_user_b`
-        FOREIGN KEY (id_user_b) REFERENCES user(id)
-        ON DELETE RESTRICT ON UPDATE CASCADE
+CREATE TABLE conversation (
+  id BINARY(16) NOT NULL,
+  created_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  id_last_message BINARY(16) NULL,
+  PRIMARY KEY (id)
 );
 
 -- =====================================================================
@@ -419,19 +409,29 @@ CREATE TABLE log(
 );
 
 -- =====================================================================
+-- Tabela: conversation_participant
+-- (tabela de relacionamento N:N entre `conversation` e `user`)
+-- =====================================================================
+DROP TABLE IF EXISTS conversation_participant;
+CREATE TABLE conversation_participant (
+  id_conversation BINARY(16) NOT NULL,
+  id_user BINARY(16) NOT NULL,
+  id_last_read_message BINARY(16) NULL,
+  joined_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_conversation, id_user),
+  KEY idx_participant_user (id_user),
+  FOREIGN KEY (id_conversation) REFERENCES conversation(id) ON DELETE CASCADE,
+  FOREIGN KEY (id_user) REFERENCES user(id) ON DELETE CASCADE,
+  FOREIGN KEY (id_last_read_message) REFERENCES message(id) ON DELETE SET NULL
+);
+
+
+-- =====================================================================
 -- Ajustes finais em `conversation` (FKs que dependem de `message`)
 -- =====================================================================
 ALTER TABLE conversation
-    ADD CONSTRAINT `fk_conversation_read_by_a_until`
-        FOREIGN KEY (read_by_a_until) REFERENCES message(id)
-        ON DELETE SET NULL ON UPDATE CASCADE,
-    ADD CONSTRAINT `fk_conversation_read_by_b_until`
-        FOREIGN KEY (read_by_b_until) REFERENCES message(id)
-        ON DELETE SET NULL ON UPDATE CASCADE,
-    ADD CONSTRAINT `fk_conversation_last_message`
-        FOREIGN KEY (id_last_message) REFERENCES message(id)
-        ON DELETE SET NULL ON UPDATE CASCADE;
-
+  ADD CONSTRAINT fk_conversation_last_message
+  FOREIGN KEY (id_last_message) REFERENCES message(id) ON DELETE SET NULL;
 
 
 

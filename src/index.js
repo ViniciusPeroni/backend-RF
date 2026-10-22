@@ -1,5 +1,9 @@
 const express = require("express"); // Importa o módulo Express
-require("dotenv-safe").config();
+try {
+  require("dotenv-safe").config({ allowEmptyValues: true });
+} catch (e) {
+  require("dotenv").config();
+}
 const testConnect = require("./db/testConnect");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
