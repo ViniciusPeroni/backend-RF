@@ -13,6 +13,7 @@
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
+- Mercado Pago usa `MP_ACCESS_TOKEN`; `MP_ENVIRONMENT` assume `sandbox` por padrão. Não habilite produção sem autorização/configuração explícita.
 - Não há suíte permanente de testes, lint, typecheck ou build. Não invente comandos; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 
 ## Fluxo de trabalho do agente
@@ -30,7 +31,7 @@
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
 - Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
 - Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
-- Comissão: `POST /commission/payment/:paymentId` gera manualmente 8% do pagamento aprovado, restrito a admin; não há integração automática ao provedor.
+- Comissão: `POST /commission/payment/:paymentId` gera manualmente 8% do pagamento aprovado, restrito a admin. Adaptador MP existe, mas checkout/webhook ainda não estão integrados.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.

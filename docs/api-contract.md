@@ -55,7 +55,7 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
-- Comissão tem endpoint administrativo para geração manual. Ainda não há integração automática ao fluxo de aprovação de pagamento.
+- Comissão tem endpoint administrativo para geração manual. Adaptador REST Mercado Pago está disponível internamente, mas ainda não há rota de checkout nem webhook integrados ao fluxo de aprovação.
 - O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há rotas REST correspondentes no inventário atual.
 - Tabela/enum `notification` não significa controller, rota ou gatilho existente.
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.

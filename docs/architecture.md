@@ -10,6 +10,7 @@ Este repositório contém a API do Reaproveita Franca. Web e mobile são aplica�
 - `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets e escuta em `PORT` ou `5000`.
 - `src/index.js` carrega ambiente, cria parsers e rotas, chama o teste de conexão MySQL e monta `/api/reaproveitafranca`.
 - `src/index.js` tenta `dotenv-safe` e captura falhas para recorrer a `dotenv`. Não assuma validação fatal sem conferir o boot real.
+- Integração MP usa `MP_ACCESS_TOKEN`; `MP_ENVIRONMENT` assume `sandbox` e só usa URL de produção quando configurado explicitamente.
 
 Fluxo REST mais comum:
 
