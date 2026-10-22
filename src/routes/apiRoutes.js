@@ -5,6 +5,7 @@ router.use("/localization", require("./modules/localizationRoutes"));
 router.use("/document", require("./modules/documentRoutes"));
 router.use("/otp", require("./modules/otpRoutes"));
 router.use("/product", require("./modules/productRoutes"));
+router.use("/review", require("./modules/reviewRoutes"));
 router.use("/log", require("./modules/logRoutes")); 
 
 module.exports = router;
