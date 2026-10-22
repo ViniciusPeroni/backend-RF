@@ -31,7 +31,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Chat | `join_conversation` | Entrada em sala por ID, sem auth/participação, envio ou persistência de mensagens |
 | Notificações | Tabela/enum no schema | Sem rota/gatilho correspondente documentado nesta revisão |
 | Negociação | Não há fluxo de negociação confirmado | Não afirmar negociação implementada |
-| Pagamento/comissão | Tabelas, sem integração/rotas correspondentes | Não afirmar pagamento disponível |
+| Pagamento/comissão | Tabelas `payment`/`commission`; service calcula 8% de `payment.value` após status `approved` | Sem controller, rota ou integração ao fluxo de aprovação; não afirmar pagamento disponível |
 | Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |
 

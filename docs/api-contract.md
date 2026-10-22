@@ -54,7 +54,7 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
-- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há contratos REST correspondentes no inventário atual.
+- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há rotas REST correspondentes no inventário atual. `commissionService` calcula a comissão, mas ainda não é chamado por controller/fluxo de pagamento.
 - Tabela/enum `notification` não significa controller, rota ou gatilho existente.
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).
