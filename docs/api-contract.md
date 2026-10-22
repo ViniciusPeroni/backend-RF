@@ -38,6 +38,7 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
+| commission | `POST /commission/payment/:paymentId` | JWT + admin + limitador global | Gera comissão de 8% sobre pagamento aprovado; repetição retorna comissão existente |
 | localization | `POST /localization/` | Validador; sem JWT explícito | Cria localização |
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
@@ -54,7 +55,8 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
-- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há rotas REST correspondentes no inventário atual. `commissionService` e `commissionController` existem, mas não estão montados em rota nem integrados ao fluxo de aprovação de pagamento.
+- Comissão tem endpoint administrativo para geração manual. Ainda não há integração automática ao fluxo de aprovação de pagamento.
+- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há rotas REST correspondentes no inventário atual.
 - Tabela/enum `notification` não significa controller, rota ou gatilho existente.
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).
