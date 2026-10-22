@@ -30,7 +30,7 @@
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
 - Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
 - Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
-- `src/services/commissionService.js` calcula 8% sobre pagamento aprovado; ainda não há controller/rota que o integre ao fluxo de pagamento.
+- Comissão: service calcula 8% sobre pagamento aprovado e controller limita a admin; ainda sem rota ou integração ao fluxo de pagamento.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
