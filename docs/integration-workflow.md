@@ -19,7 +19,8 @@ Não crie contrato porque existe tabela no schema ou porque um cliente parece es
 - Envie JWT no handshake Socket.IO usando `auth: { token }` para receber eventos na sala individual `user:<uuid>`.
 - `send_message` aceita `{ conversationId, type?, content?, id_answer? }`; a confirmação chega pelo callback e mensagens chegam como `new_message`.
 - Notificações persistidas são emitidas como `notification`; leitura/exclusão sincronizam com `notification_read`, `notifications_read_all` e `notification_deleted`.
-- Gatilhos automáticos atuais: mensagem nova, cadastro e ativação por OTP. Reserva, pagamento, review e disputa continuam pendentes até seus fluxos chamarem `notificationService.notifyUser(...)`.
+- Gatilhos automáticos atuais: mensagem nova, cadastro, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador) e cancelamento (`sistema` para cada vendedor). Pagamento, review e disputa continuam pendentes até seus fluxos chamarem `notificationService.notifyUser(...)`; o contrato está em [`notification-integration.md`](notification-integration.md).
+- Teste de integração: `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification` (MySQL de desenvolvimento; remove dados sintéticos ao final).
 - `join_conversation` segue sem autorização; não envie informações privadas confiando apenas nesse evento.
 
 Não conecte dados privados a esse socket sem resolver autenticação e autorização no servidor.

@@ -51,7 +51,7 @@ src/
 
 `notificationSocket.js` verifica JWT para adicionar o usuário à sala `user:<uuid>`. `send_message` exige identidade autenticada, confere participação em `conversation_participant`, persiste a mensagem e atualiza a conversa e o último item lido do remetente. Cada outro participante recebe `new_message` e uma notificação `nova_mensagem` persistida.
 
-`join_conversation` continua permitindo entrar em uma sala pelo ID informado sem autenticação/validação de participação; não trate o canal da conversa como privado até essa lacuna ser resolvida. Cadastro e ativação por OTP também geram notificações `sistema`. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
+`join_conversation` continua permitindo entrar em uma sala pelo ID informado sem autenticação/validação de participação; não trate o canal da conversa como privado até essa lacuna ser resolvida. Cadastro e ativação por OTP também geram notificações `sistema`; a criação de compra gera `reserva_solicitada` para cada vendedor, o aceite/recusa gera `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento gera `sistema` para cada vendedor. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
 
 ## Riscos de compatibilidade
 

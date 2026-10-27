@@ -2,7 +2,7 @@
 
 ## Estado das ferramentas
 
-O `package.json` define somente `npm start` (`node --watch src/server.js`) e `npm run start:dev` (requer `nodemon` global, não declarado no projeto). Não há scripts/configuração de testes, lint, typecheck ou build. Não invente comandos como `npm test`.
+O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto) e `npm run test:notification`. O script de notificação é uma integração com MySQL, não uma suíte completa de testes. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro. Não invente outros comandos de teste como `npm test`.
 
 O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 
@@ -24,6 +24,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
 - confirme persistência e isolamento por usuário com dados sintéticos;
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
+- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento.
 
 ### Socket.IO e provedores externos
 
@@ -42,4 +43,4 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 
 ## Relato de qualidade
 
-Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. “Não há suíte automatizada” deve continuar explícito até que uma suíte seja realmente adicionada. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade.
+Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. “Não há suíte automatizada completa” deve continuar explícito; o script de notificação é uma cobertura parcial e versionada. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade e [`notification-integration.md`](notification-integration.md) para o contrato dos gatilhos.

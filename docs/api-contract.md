@@ -30,11 +30,11 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | product | `POST /product/:id/photos` | JWT | Adiciona várias fotos, multipart `photos` |
 | product | `PUT /product/photos/:photoId` | JWT | Atualiza foto, multipart `photo` |
 | product | `DELETE /product/photos/:photoId` | JWT | Remove foto |
-| shopping | `POST /shopping/create` | JWT | Cria compra com `items` (produto UUID e quantidade positiva); baixa estoque dentro de transação |
+| shopping | `POST /shopping/create` | JWT | Cria compra com `items` (produto UUID e quantidade positiva); baixa estoque dentro de transação; notifica cada vendedor com `reserva_solicitada` |
 | shopping | `GET /shopping/` | JWT | Lista compras do usuário; admin recebe listagem geral |
 | shopping | `GET /shopping/:id` | JWT | Detalhe; controller restringe ao comprador ou admin |
-| shopping | `PATCH /shopping/:id/cancel` | JWT | Cancela compra pendente; controller restringe comprador/admin |
-| shopping | `PATCH /shopping/:id/status` | JWT | Atualiza para status permitido; não há restrição de papel/ownership explícita no controller atual |
+| shopping | `PATCH /shopping/:id/cancel` | JWT | Cancela compra pendente; controller restringe comprador/admin; notifica cada vendedor com `sistema` ("Reserva cancelada") |
+| shopping | `PATCH /shopping/:id/status` | JWT | Admin pode qualquer status válido; vendedor único dos itens pode apenas `accepted`/`refused`; comprador recebe 403. Aceite/recusa notifica o comprador (`reserva_aceita`/`reserva_recusada`); cancelamento por admin notifica os vendedores |
 | shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
@@ -65,6 +65,6 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
 - O schema inclui pagamento, disputa, avaliação e impacto ambiental, mas ainda não há rotas correspondentes a esses fluxos.
-- Gatilhos automáticos existentes incluem `nova_mensagem` e notificações `sistema` no cadastro/ativação OTP. Tipos de reserva, pagamento, review e disputa ainda não têm eventos de domínio conectados.
-- Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
+- Gatilhos automáticos existentes incluem `nova_mensagem`, notificações `sistema` no cadastro/ativação OTP e cancelamento de compra, `reserva_solicitada` na criação de compra e `reserva_aceita`/`reserva_recusada` no aceite/recusa. Pagamento, review e disputa ainda não têm eventos de domínio conectados; o contrato para essas branches está em [`notification-integration.md`](notification-integration.md).
+- Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product têm JWT, mas não verificam ownership no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).

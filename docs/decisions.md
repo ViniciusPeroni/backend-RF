@@ -9,16 +9,16 @@ Este documento é um registro de fatos técnicos e pendências observadas; não 
 - Prefixo REST: `/api/reaproveitafranca`.
 - Não há ORM nem framework de migration; `RFScript.sql` recria o banco; migration social é SQL manual.
 - Socket valida JWT para salas de usuário e envio de mensagem, mas `join_conversation` continua sem autenticação/validação de participação.
-- Compras e itens têm rotas REST. Notificações também têm rotas e gatilhos para mensagem/cadastro/OTP; pagamento, review e disputa ainda não têm fluxos REST correspondentes.
+- Compras e itens têm rotas REST; a criação de compra dispara `reserva_solicitada` para os vendedores, o aceite/recusa dispara `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento dispara `sistema` para os vendedores. Notificações também têm rotas e gatilhos para mensagem/cadastro/OTP. Pagamento, review e disputa não têm fluxos REST correspondentes.
 - `package.json` não oferece suíte de teste, lint, build ou typecheck.
 
 ## Pendências que exigem decisão ou verificação
 
 - Ciclo de compra/reserva: quantidade, aceite/recusa, cancelamento, conclusão e ownership.
 - Provedor/política de pagamento, tarifas, reembolso, webhooks e fonte de confirmação.
-- Contratos para mensagens, negociação, review, disputa, notificação e impacto ambiental.
+- Contratos para mensagens, negociação, review, disputa e impacto ambiental. O contrato de notificações para esses fluxos está definido em [`notification-integration.md`](notification-integration.md), mas ainda depende das branches de pagamento, review e disputa implementarem os controllers e chamarem `notifyUser`.
 - Autorização em `localization`/`log`, propriedade de update/delete de produto e isolamento de documentos.
-- Autorização de `PATCH /shopping/:id/status` e ownership das consultas `/shopping-product/*`.
+- Autorização de `PATCH /shopping/:id/status` resolvida para admin ou vendedor único (apenas `accepted`/`refused`); ownership das consultas `/shopping-product/*` continua pendente.
 - Autenticação/autorização do socket e origens CORS configuráveis por ambiente.
 - Limpeza de mensagens: cron desativado e função `cleanUpMessages` ausente.
 - Portabilidade: `src/index.js` requer `./db/testConnect`, mas o arquivo chama-se `testconnect.js`.

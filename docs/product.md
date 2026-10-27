@@ -23,14 +23,14 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Cadastro, autenticação local e OTP | Rotas/controllers | API presente; integração depende de ambiente e SMTP real |
 | Google/LinkedIn | Rotas e código no controller | API presente; credenciais e integração externa precisam ser verificadas |
 | Produtos e fotos | Rotas públicas, JWT para mutações | CRUD disponível; conferir ownership e validar ponta a ponta |
-| Compras | `/shopping/*` com JWT | Criação, listagem, detalhe, cancelamento e atualização de status disponíveis; revisar autorização de `PATCH /status` |
+| Compras | `/shopping/*` com JWT | Criação (notifica vendedores com `reserva_solicitada`), listagem, detalhe, cancelamento (notifica vendedores) e atualização de status (aceite/recusa notifica comprador) disponíveis; `PATCH /status` restrito a admin ou vendedor único |
 | Itens de compra | `/shopping-product/*` com JWT | Consultas disponíveis; endpoints não verificam ownership no controller atual |
 | Localização | POST montado com validador | Rota presente; sem JWT explícito na montagem atual |
 | Logs | CRUD montado | Rota presente sem JWT explícito; não presumir seguro para exposição pública |
 | Documentos | Rotas JWT/admin | Há operações; revisão de ownership necessária para criação/listagens/metadados |
 | Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; `join_conversation` ainda não valida participação |
-| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD e contagem disponíveis; gatilhos atuais para mensagem, cadastro e OTP |
-| Reserva/negociação | Tabelas e parte do fluxo de compra | Não há gatilhos de notificação de reserva/aceite/recusa conectados |
+| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD e contagem disponíveis; gatilhos atuais para mensagem, cadastro, OTP e criação de compra |
+| Reserva/negociação | Tabelas e fluxo de compra | Criação notifica `reserva_solicitada`; aceite/recusa notifica `reserva_aceita`/`reserva_recusada`; cancelamento notifica `sistema` aos vendedores |
 | Pagamento/comissão | Tabelas, sem integração/rotas correspondentes | Não afirmar pagamento disponível |
 | Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |
