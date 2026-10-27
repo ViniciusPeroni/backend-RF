@@ -1,7 +1,7 @@
 const uuid = require('../utils/uuid');
 const messageService = require('../services/messageService');
 const notificationService = require('../services/notificationService');
-const { extractToken, getDecodedToken, getUserIdFromToken, emitToUser } = require('./notificationSocket');
+const { extractToken, getDecodedToken, getUserIdFromToken, userRoom } = require('./notificationSocket');
 
 function chatSocket(io) {
 
@@ -77,7 +77,12 @@ function chatSocket(io) {
                     id_answer: id_answer || null
                 };
 
-                io.to(String(conversationId)).emit("new_message", message);
+                const messageEmitter = recipients.reduce(
+                    (emitter, recipient) => emitter.to(userRoom(recipient)),
+                    io.to(String(conversationId))
+                );
+
+                messageEmitter.emit("new_message", message);
 
                 const senderName = socket.userName || "Usuário";
                 const preview = type === "texto"
@@ -85,8 +90,6 @@ function chatSocket(io) {
                     : `Enviou uma mensagem do tipo ${type}.`;
 
                 for (const recipient of recipients) {
-                    emitToUser(recipient, "new_message", message);
-
                     try {
                         await notificationService.notifyUser({
                             id_user: recipient,
