@@ -11,6 +11,7 @@ const shoppingService = {
 
             let totalValue = 0;
             const processedItems = [];
+            const sellers = new Map();
 
             for (const item of items) {
                 const productBinId = uuid.toBin(item.id_product);
@@ -69,6 +70,15 @@ const shoppingService = {
                     subtotal: itemTotal,
                     current_stock: product.quantity
                 });
+
+                const sellerId = String(product.id_user).toLowerCase();
+                if (!sellers.has(sellerId)) {
+                    sellers.set(sellerId, []);
+                }
+                sellers.get(sellerId).push({
+                    name: product.name,
+                    quantity: item.quantity
+                });
             }
 
             totalValue = Number(totalValue.toFixed(2));
@@ -111,10 +121,13 @@ const shoppingService = {
             await conn.commit();
 
             return {
-                id: shoppingId,
-                value: totalValue,
-                status: "pending",
-                items: processedItems.map(({ current_stock, ...rest }) => rest)
+                shopping: {
+                    id: shoppingId,
+                    value: totalValue,
+                    status: "pending",
+                    items: processedItems.map(({ current_stock, ...rest }) => rest)
+                },
+                sellers: [...sellers].map(([id, items]) => ({ id, items }))
             };
 
         } catch (error) {
