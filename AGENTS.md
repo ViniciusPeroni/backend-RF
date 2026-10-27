@@ -13,7 +13,7 @@
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
-- Não há suíte permanente de testes, lint, typecheck ou build. Não invente comandos; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- Não há suíte completa de testes, lint, typecheck ou build. Existe `npm run test:notification` para integração de notificações, que exige `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. Use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 
 ## Fluxo de trabalho do agente
 
@@ -28,8 +28,9 @@
 
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
-- Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
-- Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` também exige usuário autenticado e participante na conversa. `join_conversation` continua sem validação de identidade/participação, então não trate a sala como protegida.
+- Notificações automáticas atuais: mensagem nova, cadastro de conta, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador) e cancelamento (`sistema` para cada vendedor). Pagamento, review e disputa ainda dependem dos respectivos fluxos.
+- Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.

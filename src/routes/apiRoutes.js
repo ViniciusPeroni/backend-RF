@@ -8,5 +8,6 @@ router.use("/product", require("./modules/productRoutes"));
 router.use("/shopping", require("./modules/shoppingRoutes"));
 router.use("/shopping-product", require("./modules/shoppingProductRoutes"));
 router.use("/log", require("./modules/logRoutes")); 
+router.use("/notification", require("./modules/notificationRoutes"));
 
 module.exports = router;

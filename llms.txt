@@ -31,10 +31,10 @@
 
 - Inicialização: `npm start`; HTTP em `PORT` ou `5000`; prefixo `/api/reaproveitafranca`.
 - `.env.example` lista variáveis. A inicialização tenta `dotenv-safe`, captura falha e recorre a `dotenv`; confirme o comportamento real antes de afirmar que variáveis ausentes impedem boot.
-- Não há scripts permanentes de teste, lint, build ou typecheck.
+- Não há suíte completa de testes, lint, build ou typecheck. Existe `npm run test:notification` para integração de notificações, com `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento.
 - Schema: `src/mysql-init/RFScript.sql` é destrutivo (`DROP DATABASE`). Nunca execute com dados importantes.
 - IDs UUIDv7 são `BINARY(16)` no MySQL. CPF/CNPJ passam por HMAC e AES-256-GCM.
 - Compras e itens têm rotas REST; endpoints de atualização de status e consulta de itens têm lacunas de ownership descritas nos guias de segurança.
-- Na revisão observada, Socket.IO só implementa `join_conversation`, sem autenticação/validação de participação. A tabela `notification` não tem rota/serviço documentado.
+- Socket.IO usa JWT para salas individuais e `send_message` persiste mensagens e notifica participantes; `join_conversation` ainda não valida autorização. Notificações também têm API/serviço, com gatilhos de mensagem, cadastro, OTP, criação de compra (`reserva_solicitada`), aceite/recusa (`reserva_aceita`/`reserva_recusada`) e cancelamento (`sistema`); pagamento, review e disputa continuam pendentes. Contrato para novas integrações: [docs/notification-integration.md](docs/notification-integration.md).
 
 Não use exemplos com credenciais, tokens, CPF/CNPJ, endereço ou dados pessoais reais. Confira a implementação antes de atualizar este resumo.

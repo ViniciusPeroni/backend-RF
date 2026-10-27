@@ -8,6 +8,7 @@ const { OAuth2Client } = require("google-auth-library");
 const uuid = require('../utils/uuid');
 const doc = require('../services/docService');
 const loc = require('../services/localizationService');
+const notificationService = require('../services/notificationService');
 const generatePassword = require('../utils/generateRandomPassword');
 const enviarCredenciaisAdmin = require('../utils/sendAdminCredentials');
 const enviarEmailReset = require('../utils/sendPasswordReset');
@@ -17,6 +18,21 @@ const VALID_STATUS = ['inactive', 'awaitingForEmail', 'active'];
 
 function isValidEmail(email) {
     return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function notifyWelcome(id_user, role) {
+    try {
+        await notificationService.notifyUser({
+            id_user,
+            type: 'sistema',
+            title: 'Bem-vindo(a) ao Reaproveita Franca',
+            content: role === 'company'
+                ? 'Sua empresa foi cadastrada. Confirme seu e-mail para ativar a conta.'
+                : 'Sua conta foi criada. Confirme seu e-mail para ativar a conta.'
+        });
+    } catch (error) {
+        console.error('Erro ao criar notificação de boas-vindas:', error);
+    }
 }
 
 const createUser = async (req, res) => {
@@ -114,6 +130,8 @@ const createUser = async (req, res) => {
         console.error('OTP não enviado após signup:', emailError.message);
         emailSent = false;
     }
+
+    await notifyWelcome(id, role);
 
     return res.status(201).json({
         message: emailSent
@@ -220,6 +238,8 @@ const createCompany = async (req, res) => {
         console.error('OTP não enviado após signup:', emailError.message);
         emailSent = false;
     }
+
+    await notifyWelcome(id, role);
 
     return res.status(201).json({
         message: emailSent
@@ -456,6 +476,8 @@ async function findOrCreateSocialUser({ provider, providerId, email, name }) {
          VALUES (?, 'user', ?, ?, NULL, NULL, 'active', ?)`,
         [uuid.toBin(id), safeName, email, providerId]
     );
+
+    await notifyWelcome(id, 'user');
 
     return { id, role: 'user', name: safeName, email, status: 'active', [column]: providerId };
 }

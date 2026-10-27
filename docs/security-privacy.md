@@ -16,7 +16,7 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 - Login/reset/sessão e papéis devem ser confirmados no middleware/controller; não deduza proteção pelo nome da rota.
 - Rotas de `localization` e `log` não têm JWT explícito na montagem atual.
 - Mutação de produto exige JWT, mas revise no controller se o usuário é dono do produto/foto.
-- Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` aceita JWT, mas o controller não valida papel nem propriedade antes de atualizar.
+- Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` valida papel/propriedade: admin pode qualquer status válido; vendedor único dos itens pode apenas `accepted`/`refused`; compras multi-vendedor ficam restritas ao admin.
 - Consultas `shopping-product` exigem JWT, porém não verificam ownership da compra/item nos controllers atuais; avaliar exposição entre usuários.
 - Rotas de documentos que recebem `userId` ou ID de registro precisam conferir vínculo com `req.userId`. Na implementação documentada, criação/listagem/metadados não garantem ownership; descriptografia e exclusão exigem admin.
 - OTP enviar/verificar não exigem JWT na rota e recebem identificador no body; considere abuso, enumeração e limites ao alterar esse fluxo.
@@ -24,7 +24,10 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 
 ## Socket.IO
 
-No estado observado, não há auth no handshake nem validação de participante. `join_conversation` aceita ID recebido para entrada na sala. Isso pode expor dados privados quando houver eventos nessa sala; não trate como chat seguro de produção.
+- O handshake usa JWT para a sala individual `user:<uuid>`; a conexão anônima ainda pode ser estabelecida, mas não é associada a uma sala de usuário.
+- `send_message` exige JWT válido e valida participação usando `conversation_participant` antes de gravar.
+- `join_conversation` ainda aceita qualquer ID sem autenticação ou validação de participante. Isso pode expor eventos privados da sala; não trate esse evento como seguro.
+- Mensagens/notificações direcionadas a usuários são emitidas para as salas individuais. Não envie tokens em URLs; prefira `auth: { token }` no handshake.
 
 ## Configuração e riscos operacionais
 
