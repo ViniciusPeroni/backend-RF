@@ -72,4 +72,41 @@ async function getPayment(paymentId) {
     }
 }
 
-module.exports = { createPreference, getPayment };
+async function getPreference(preferenceId) {
+    if (!/^[\w-]+$/.test(String(preferenceId))) {
+        throw createError("ID de preferência do Mercado Pago inválido.", 400);
+    }
+
+    const accessToken = getAccessToken();
+    const environment = getEnvironment();
+    let data;
+    try {
+        ({ data } = await axios.get(
+            `${API_URL}/checkout/preferences/${encodeURIComponent(preferenceId)}`,
+            requestConfig(accessToken)
+        ));
+    } catch {
+        throw createError("Não foi possível consultar a preferência no Mercado Pago.", 502);
+    }
+
+    const checkoutUrl = environment === "production" ? data?.init_point : data?.sandbox_init_point;
+    if (!data?.id || !checkoutUrl) {
+        throw createError("O Mercado Pago retornou uma preferência inválida.", 502);
+    }
+    return { id: String(data.id), checkoutUrl };
+}
+
+async function getPaymentMethods() {
+    const accessToken = getAccessToken();
+    try {
+        const { data } = await axios.get(`${API_URL}/v1/payment_methods`, requestConfig(accessToken));
+        if (!Array.isArray(data)) {
+            throw new Error("Resposta inválida");
+        }
+        return data;
+    } catch {
+        throw createError("Não foi possível consultar os meios de pagamento.", 502);
+    }
+}
+
+module.exports = { createPreference, getPayment, getPreference, getPaymentMethods };

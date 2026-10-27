@@ -10,7 +10,7 @@ Este repositório contém a API do Reaproveita Franca. Web e mobile são aplica�
 - `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets e escuta em `PORT` ou `5000`.
 - `src/index.js` carrega ambiente, cria parsers e rotas, chama o teste de conexão MySQL e monta `/api/reaproveitafranca`.
 - `src/index.js` tenta `dotenv-safe` e captura falhas para recorrer a `dotenv`. Não assuma validação fatal sem conferir o boot real.
-- Integração MP usa `MP_ACCESS_TOKEN`; `MP_ENVIRONMENT` assume `sandbox` e só usa URL de produção quando configurado explicitamente.
+- Integração MP usa `MP_ACCESS_TOKEN`; `MP_ENVIRONMENT` assume `sandbox` e só usa URL de produção quando configurado explicitamente. `MP_NOTIFICATION_URL` configura notificações e `MP_WEBHOOK_SECRET` valida assinaturas.
 
 Fluxo REST mais comum:
 
@@ -42,7 +42,7 @@ src/
 ## Banco e IDs
 
 - Schema base: `src/mysql-init/RFScript.sql`; começa removendo e recriando `Reaproveita_Franca`. Não executar em banco com dados importantes.
-- `src/mysql-init/migration_social_login.sql` e `migration_mercado_pago.sql` são migrações SQL manuais/aditivas. Não há ORM nem framework de migrations; cada migration deve ser aplicada uma vez em banco existente.
+- `src/mysql-init/migration_social_login.sql`, `migration_mercado_pago.sql` e `migration_mercado_pago_payment_id.sql` são migrações SQL manuais/aditivas. Não há ORM nem framework de migrations; aplique cada migration uma vez e na ordem indicada em banco existente.
 - UUIDv7 é exposto como string e armazenado como `BINARY(16)`. Use `src/utils/uuid.js` na fronteira e `BIN_TO_UUID()` nas leituras; confira os módulos existentes antes de alterar padrão.
 - Use crases para identificadores reservados como `user`, `table` e `read`.
 - O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.

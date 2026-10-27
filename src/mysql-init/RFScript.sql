@@ -224,6 +224,7 @@ CREATE TABLE payment (
     value       DECIMAL(9,2) NOT NULL,
     method      ENUM('pix','debit_card','credit_card','account_money') NOT NULL,
     mp_preference_id VARCHAR(100) NULL,
+    mp_payment_id VARCHAR(100) NULL,
     status      ENUM('pending','approved','refused','refunded')
                   NOT NULL DEFAULT 'pending',
     datetime    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -232,6 +233,7 @@ CREATE TABLE payment (
     KEY `idx_payment_shopping` (`id_shopping`),
     KEY `idx_payment_card` (`id_card`),
     UNIQUE KEY `idx_payment_mp_preference` (`mp_preference_id`),
+    UNIQUE KEY `idx_payment_mp_payment` (`mp_payment_id`),
     CONSTRAINT `fk_payment_shopping`
         FOREIGN KEY (id_shopping) REFERENCES shopping(id)
         ON DELETE RESTRICT ON UPDATE CASCADE,

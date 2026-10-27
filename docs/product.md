@@ -32,7 +32,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Chat | `join_conversation` | Entrada em sala por ID, sem auth/participação, envio ou persistência de mensagens |
 | Notificações | Tabela/enum no schema | Sem rota/gatilho correspondente documentado nesta revisão |
 | Negociação | Não há fluxo de negociação confirmado | Não afirmar negociação implementada |
-| Pagamento/comissão | Endpoint admin de comissão e adaptador REST MP para preferências/consulta | Checkout e webhook ainda não estão integrados; geração segue manual |
+| Pagamento/comissão | Checkout Pro, consulta autenticada e webhook assinado; aprovação gera comissão de 8% | Integração real requer credenciais/URL e migrações no ambiente; começar em sandbox, sem split |
 | Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |
 

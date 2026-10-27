@@ -39,6 +39,9 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
 | commission | `POST /commission/payment/:paymentId` | JWT + admin + limitador global | Gera comissão de 8% sobre pagamento aprovado; repetição retorna comissão existente |
+| payment | `POST /payment/checkout` | JWT + limitador global | Recebe `shoppingId` e `method`; service permite apenas o comprador e shopping `accepted`, calcula total do banco e cria/retoma preferência Checkout Pro |
+| payment | `GET /payment/:paymentId` | JWT + limitador global | Consulta status/método/valor; somente comprador dono ou admin |
+| payment | `POST /payment/webhook` | Público + limitador global | Valida `x-signature`, `x-request-id` e ID da notificação; consulta o pagamento no provedor antes de atualizar estado local |
 | localization | `POST /localization/` | Validador; sem JWT explícito | Cria localização |
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
@@ -55,7 +58,7 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
-- Comissão tem endpoint administrativo para geração manual. Adaptador REST Mercado Pago está disponível internamente, mas ainda não há rota de checkout nem webhook integrados ao fluxo de aprovação.
+- Checkout Pro tem rotas autenticadas para iniciar/retomar preferência e consultar estado local em sandbox; webhook assinado atualiza estado e gera comissão idempotente para aprovações. Configure o segredo e aplique as migrações manuais antes de habilitar notificações.
 - O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há rotas REST correspondentes no inventário atual.
 - Tabela/enum `notification` não significa controller, rota ou gatilho existente.
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.

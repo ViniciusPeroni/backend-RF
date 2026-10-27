@@ -18,6 +18,7 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 - Mutação de produto exige JWT, mas revise no controller se o usuário é dono do produto/foto.
 - Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` aceita JWT, mas o controller não valida papel nem propriedade antes de atualizar.
 - Comissão: geração manual em `POST /commission/payment/:paymentId` exige JWT e papel admin, além do limitador global. Isso não é confirmação automática de pagamento pelo provedor.
+- Pagamento: checkout exige JWT e confere ownership/estado aceito no service; consulta de pagamento limita comprador dono/admin. `POST /payment/webhook` é público por exigência do provedor e só processa após validar HMAC, request ID e consultar o pagamento pela API. Mantenha `MP_WEBHOOK_SECRET` fora do repositório e aplique a migration de ID externo antes de habilitar notificações.
 - Consultas `shopping-product` exigem JWT, porém não verificam ownership da compra/item nos controllers atuais; avaliar exposição entre usuários.
 - Rotas de documentos que recebem `userId` ou ID de registro precisam conferir vínculo com `req.userId`. Na implementação documentada, criação/listagem/metadados não garantem ownership; descriptografia e exclusão exigem admin.
 - OTP enviar/verificar não exigem JWT na rota e recebem identificador no body; considere abuso, enumeração e limites ao alterar esse fluxo.

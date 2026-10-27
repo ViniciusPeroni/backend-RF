@@ -31,7 +31,8 @@
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
 - Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
 - Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
-- Comissão: `POST /commission/payment/:paymentId` gera manualmente 8% do pagamento aprovado, restrito a admin. Adaptador MP existe, mas checkout/webhook ainda não estão integrados.
+- Pagamentos: checkout exige JWT do comprador e compra aceita; webhook assinado atualiza status e dispara comissão aprovada. Configure `MP_WEBHOOK_SECRET` e aplique `migration_mercado_pago_payment_id.sql` antes de habilitar notificações.
+- Comissão: `POST /commission/payment/:paymentId` gera manualmente 8% do pagamento aprovado, restrito a admin.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
@@ -39,7 +40,7 @@
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql` e `migration_mercado_pago.sql`. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, `migration_mercado_pago.sql` e `migration_mercado_pago_payment_id.sql`. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
 - JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.

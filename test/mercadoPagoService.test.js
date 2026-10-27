@@ -71,6 +71,36 @@ test("fetches a payment by Mercado Pago ID", async (t) => {
     assert.deepEqual(payment, { id: 123, status: "approved" });
 });
 
+test("fetches a preference and returns the environment-specific checkout URL", async (t) => {
+    setEnv(t, "MP_ACCESS_TOKEN", "TEST-access-token");
+    setEnv(t, "MP_ENVIRONMENT", "sandbox");
+    let request;
+    mock.method(axios, "get", async (...args) => {
+        request = args;
+        return { data: { id: "pref-123", init_point: "https://mp.example/live", sandbox_init_point: "https://mp.example/test" } };
+    });
+
+    const preference = await mercadoPagoService.getPreference("pref-123");
+
+    assert.equal(request[0], "https://api.mercadopago.com/checkout/preferences/pref-123");
+    assert.equal(preference.id, "pref-123");
+    assert.equal(preference.checkoutUrl, "https://mp.example/test");
+});
+
+test("loads Mercado Pago payment methods", async (t) => {
+    setEnv(t, "MP_ACCESS_TOKEN", "TEST-access-token");
+    let request;
+    mock.method(axios, "get", async (...args) => {
+        request = args;
+        return { data: [{ id: "pix", payment_type_id: "bank_transfer" }] };
+    });
+
+    const methods = await mercadoPagoService.getPaymentMethods();
+
+    assert.equal(request[0], "https://api.mercadopago.com/v1/payment_methods");
+    assert.deepEqual(methods, [{ id: "pix", payment_type_id: "bank_transfer" }]);
+});
+
 test("requires an access token without making a provider request", async (t) => {
     setEnv(t, "MP_ACCESS_TOKEN", undefined);
     let requestCalled = false;
