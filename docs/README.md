@@ -29,7 +29,7 @@ Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve
 - Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.
 - Aplicações web e móvel são projetos independentes. Esta documentação cobre somente `backend-RF/`.
 - Não há suíte completa de testes, lint, typecheck ou build no `package.json`.
-- Existe um script de integração de notificações: `npm run test:notification` (requer `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento). Ele não cobre todo o backend.
+- Existem scripts de integração: `npm run test:notification` e `npm run test:card` (ambos requerem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento). Eles não cobrem todo o backend.
 - `src/mysql-init/RFScript.sql` contém `DROP DATABASE`; nunca o execute em banco com dados importantes.
 - CPF/CNPJ não podem ser persistidos em texto puro. Não inclua segredos ou dados pessoais em documentação, logs ou exemplos.
 

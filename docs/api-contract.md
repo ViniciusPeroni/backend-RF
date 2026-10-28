@@ -38,6 +38,11 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
+| card | `POST /card/create` | JWT | Cadastra cartão tokenizado do próprio usuário; `payment_token` é gravado e nunca retornado; JWT de usuário removido responde 401 |
+| card | `GET /card/` | JWT | Lista somente os cartões de `req.userId`; token não é exposto |
+| card | `GET /card/:id` | JWT | Detalhe do próprio cartão; cartão de outro usuário responde 404 |
+| card | `PUT /card/:id` | JWT | Atualiza campos do próprio cartão; validade é checada contra a data atual |
+| card | `DELETE /card/:id` | JWT | Exclui o próprio cartão; pagamentos antigos ficam com `id_card` NULL |
 | localization | `POST /localization/` | Validador; sem JWT explícito | Cria localização |
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
@@ -64,6 +69,7 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
+- Cartões têm CRUD autenticado e restrito ao dono, mas o pagamento (`payment`) continua sem rotas e sem integração com gateway. O `payment_token` armazenado não é devolvido pela API.
 - O schema inclui pagamento, disputa, avaliação e impacto ambiental, mas ainda não há rotas correspondentes a esses fluxos.
 - Gatilhos automáticos existentes incluem `nova_mensagem`, notificações `sistema` no cadastro/ativação OTP e cancelamento de compra, `reserva_solicitada` na criação de compra e `reserva_aceita`/`reserva_recusada` no aceite/recusa. Pagamento, review e disputa ainda não têm eventos de domínio conectados; o contrato para essas branches está em [`notification-integration.md`](notification-integration.md).
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product têm JWT, mas não verificam ownership no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
