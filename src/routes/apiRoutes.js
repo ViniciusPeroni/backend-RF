@@ -10,5 +10,6 @@ router.use("/shopping-product", require("./modules/shoppingProductRoutes"));
 router.use("/log", require("./modules/logRoutes")); 
 router.use("/notification", require("./modules/notificationRoutes"));
 router.use("/conversation", require("./modules/conversationRoutes"));
+router.use("/card", require("./modules/cardRoutes"));
 
 module.exports = router;
