@@ -18,6 +18,7 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 - Mutação de produto exige JWT, mas revise no controller se o usuário é dono do produto/foto.
 - Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` valida papel/propriedade: admin pode qualquer status válido; vendedor único dos itens pode apenas `accepted`/`refused`; compras multi-vendedor ficam restritas ao admin.
 - Consultas `shopping-product` exigem JWT, porém não verificam ownership da compra/item nos controllers atuais; avaliar exposição entre usuários.
+- Cartões (`/card/*`) exigem JWT e são sempre filtrados por `req.userId` no service: cartão de outro usuário responde 404. O `payment_token` do gateway é gravado, nunca selecionado nas consultas e nunca retornado; a API não recebe número completo nem CVV. Excluir o cartão não apaga pagamentos (a FK usa `ON DELETE SET NULL`).
 - Rotas de documentos que recebem `userId` ou ID de registro precisam conferir vínculo com `req.userId`. Na implementação documentada, criação/listagem/metadados não garantem ownership; descriptografia e exclusão exigem admin.
 - OTP enviar/verificar não exigem JWT na rota e recebem identificador no body; considere abuso, enumeração e limites ao alterar esse fluxo.
 - `userRoutes.js` aplica middlewares em ordem posicional; inserir rota no bloco errado pode expô-la ou restringi-la indevidamente.

@@ -35,6 +35,7 @@
 - Schema: `src/mysql-init/RFScript.sql` é destrutivo (`DROP DATABASE`). Nunca execute com dados importantes.
 - IDs UUIDv7 são `BINARY(16)` no MySQL. CPF/CNPJ passam por HMAC e AES-256-GCM.
 - Compras e itens têm rotas REST; endpoints de atualização de status e consulta de itens têm lacunas de ownership descritas nos guias de segurança.
+- Cartões (`/card/*`) têm CRUD autenticado por dono: o token do gateway é gravado e nunca retornado. Pagamento, comissão e disputa continuam sem rotas.
 - Socket.IO usa JWT para salas individuais e `send_message` persiste mensagens e notifica participantes; `join_conversation` ainda não valida autorização. Notificações também têm API/serviço, com gatilhos de mensagem, cadastro, OTP, criação de compra (`reserva_solicitada`), aceite/recusa (`reserva_aceita`/`reserva_recusada`) e cancelamento (`sistema`); pagamento, review e disputa continuam pendentes. Contrato para novas integrações: [docs/notification-integration.md](docs/notification-integration.md).
 
 Não use exemplos com credenciais, tokens, CPF/CNPJ, endereço ou dados pessoais reais. Confira a implementação antes de atualizar este resumo.
