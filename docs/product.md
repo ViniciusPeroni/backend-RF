@@ -26,7 +26,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Compras | `/shopping/*` com JWT | Criação (notifica vendedores com `reserva_solicitada`), listagem, detalhe, cancelamento (notifica vendedores) e atualização de status (aceite/recusa notifica comprador) disponíveis; `PATCH /status` restrito a admin ou vendedor único |
 | Itens de compra | `/shopping-product/*` com JWT | Consultas disponíveis; endpoints não verificam ownership no controller atual |
 | Cartões | `/card/*` com JWT | CRUD do próprio cartão tokenizado (gateway); `payment_token` nunca retornado; pagamento ainda não integrado |
-| Localização | POST montado com validador | Rota presente; sem JWT explícito na montagem atual |
+| Localização | CRUD do dono + visão pública (RN10) | Todas as rotas com JWT exceto `GET /product/:productId` (token opcional); POST exige `userId` igual ao token (403); mascaramento antes da reserva aceita |
 | Logs | CRUD montado | Rota presente sem JWT explícito; não presumir seguro para exposição pública |
 | Documentos | Rotas JWT/admin | Há operações; revisão de ownership necessária para criação/listagens/metadados |
 | Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; `join_conversation` ainda não valida participação |

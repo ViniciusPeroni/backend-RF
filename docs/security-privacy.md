@@ -14,7 +14,7 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 
 - `verifyJWT` verifica assinatura com `SECRET`, aceita Bearer ou token cru e popula `req.userId`, `req.role`, `req.userName`.
 - Login/reset/sessão e papéis devem ser confirmados no middleware/controller; não deduza proteção pelo nome da rota.
-- Rotas de `localization` e `log` não têm JWT explícito na montagem atual.
+- Rotas de `log` não têm JWT explícito na montagem atual. Todas as rotas de `localization` exigem JWT: o POST recusa `userId` divergente de `req.userId` (403) e leitura/edição/exclusão respondem 404 para registro de outro usuário. A única rota pública é `GET /localization/product/:productId` com `optionalJWT`: token inválido/expirado segue anônimo (nunca 401) e o endereço completo só é liberado para o dono ou comprador com shopping `accepted`/`completed` (RN10).
 - Mutação de produto exige JWT, mas revise no controller se o usuário é dono do produto/foto.
 - Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` valida papel/propriedade: admin pode qualquer status válido; vendedor único dos itens pode apenas `accepted`/`refused`; compras multi-vendedor ficam restritas ao admin.
 - Consultas `shopping-product` exigem JWT, porém não verificam ownership da compra/item nos controllers atuais; avaliar exposição entre usuários.
