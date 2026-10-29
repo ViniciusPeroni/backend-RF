@@ -166,7 +166,7 @@ const productService = {
     },
 
 
-    async updateProduct(id, data, photos) {
+    async updateProduct(id, data, userId, photos) {
         let conn;
         try {
             conn = await connect.promise().getConnection();
@@ -186,7 +186,7 @@ const productService = {
                     weight = ?,
                     conservation_state = ?,
                     id_localization = ?
-                WHERE id = ?`,
+                WHERE id = ? AND id_user = ?`,
                 [
                     data.name,
                     data.description || null,
@@ -199,7 +199,8 @@ const productService = {
                     data.weight,
                     data.conservation_state,
                     uuid.toBin(data.id_localization),
-                    id
+                    id,
+                    uuid.toBin(userId)
                 ]
             );
 
@@ -241,11 +242,11 @@ const productService = {
     },
 
 
-    async deleteProduct(id) {
+    async deleteProduct(id, userId) {
         const [result] = await connect.promise().query(
             `DELETE FROM product
-             WHERE id = ?`,
-            [id]
+             WHERE id = ? AND id_user = ?`,
+            [id, uuid.toBin(userId)]
         );
 
         return result.affectedRows > 0;
