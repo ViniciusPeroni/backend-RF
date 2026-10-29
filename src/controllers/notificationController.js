@@ -7,6 +7,7 @@ const { NOTIFICATION_TYPES } = notificationService;
 function validateNotification({
     type,
     title,
+    content,
     reference_table,
     reference_id
 }) {
@@ -14,19 +15,37 @@ function validateNotification({
         return 'type e title são obrigatórios.';
     }
 
+    if (typeof title !== 'string' || !title.trim()) {
+        return 'title deve ser um texto não vazio.';
+    }
+
     if (!NOTIFICATION_TYPES.includes(type)) {
         return `type inválido. Valores permitidos: ${NOTIFICATION_TYPES.join(', ')}.`;
     }
 
-    if (String(title).length > 100) {
+    if (title.length > 100) {
         return 'title deve ter no máximo 100 caracteres.';
     }
 
-    if (reference_table && String(reference_table).length > 30) {
-        return 'reference_table deve ter no máximo 30 caracteres.';
+    if (content !== undefined && content !== null) {
+        if (typeof content !== 'string') {
+            return 'content deve ser um texto.';
+        }
+        if (Buffer.byteLength(content, 'utf8') > 65535) {
+            return 'content deve ter no máximo 65535 bytes em UTF-8.';
+        }
     }
 
-    if (reference_id && !isValid(reference_id)) {
+    if (reference_table !== undefined && reference_table !== null) {
+        if (typeof reference_table !== 'string' || !reference_table.trim()) {
+            return 'reference_table deve ser um texto não vazio.';
+        }
+        if (reference_table.length > 30) {
+            return 'reference_table deve ter no máximo 30 caracteres.';
+        }
+    }
+
+    if (reference_id !== undefined && reference_id !== null && !isValid(reference_id)) {
         return 'reference_id inválido. Deve ser um UUID válido.';
     }
 
@@ -34,9 +53,12 @@ function validateNotification({
 }
 
 const createNotification = async (req, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+        return res.status(400).json({ error: 'O corpo deve ser um objeto JSON.' });
+    }
     const { type, title, content, reference_table, reference_id } = req.body;
 
-    const validationError = validateNotification({ type, title, reference_table, reference_id });
+    const validationError = validateNotification({ type, title, content, reference_table, reference_id });
 
     if (validationError) {
         return res.status(400).json({ error: validationError });
