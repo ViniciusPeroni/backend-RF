@@ -28,9 +28,11 @@
 
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
-- `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` também exige usuário autenticado e participante na conversa. `join_conversation` continua sem validação de identidade/participação, então não trate a sala como protegida.
+- `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` e `join_conversation` exigem identidade autenticada e participação na conversa. A validação do JWT para ingresso ocorre na conexão; não há desconexão automática quando o token expira depois dela.
 - Notificações automáticas atuais: mensagem nova, cadastro de conta, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador) e cancelamento (`sistema` para cada vendedor). Pagamento, review e disputa ainda dependem dos respectivos fluxos.
 - Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- `shoppingService.updateStatus` retorna `{ shopping, previousStatus, changed }`, decididos sob lock transacional. Controllers notificam apenas quando `changed`; `/cancel` exige `onlyPending` dentro da transação. Esses metadados não fazem parte da resposta HTTP.
+- `npm run test:notification` cobre MySQL/HTTP e transporte Socket.IO real (WebSocket nativo; Node.js 22+). O teste não exercita SMTP/OAuth reais, carga nem clientes web/mobile.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.

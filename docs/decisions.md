@@ -8,7 +8,7 @@ Este documento é um registro de fatos técnicos e pendências observadas; não 
 - Backend: CommonJS, Express 4, MySQL 8, Socket.IO; IDs UUIDv7 em `BINARY(16)`.
 - Prefixo REST: `/api/reaproveitafranca`.
 - Não há ORM nem framework de migration; `RFScript.sql` recria o banco; migration social é SQL manual.
-- Socket valida JWT para salas de usuário e envio de mensagem, mas `join_conversation` continua sem autenticação/validação de participação.
+- Socket valida JWT para salas de usuário; envio de mensagem e `join_conversation` exigem identidade autenticada e participação. A validação do JWT no ingresso não implica revogação/expiração contínua da conexão.
 - Compras e itens têm rotas REST; a criação de compra dispara `reserva_solicitada` para os vendedores, o aceite/recusa dispara `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento dispara `sistema` para os vendedores. Notificações também têm rotas e gatilhos para mensagem/cadastro/OTP. Pagamento, review e disputa não têm fluxos REST correspondentes.
 - `package.json` não oferece suíte de teste, lint, build ou typecheck.
 

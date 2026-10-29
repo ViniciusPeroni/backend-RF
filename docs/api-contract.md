@@ -52,7 +52,7 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
 | document | `GET /document/:id/decrypt`, `DELETE /document/:id` | JWT + admin | Descriptografar/excluir documento |
-| notification | `POST /notification/` | JWT | Cria notificação para `req.userId`; o destinatário não é aceito do body |
+| notification | `POST /notification/` | JWT | Cria notificação para `req.userId`; o destinatário não é aceito do body. Corpo objeto JSON; título textual não vazio, até 100 caracteres; `content` opcional textual, até 65.535 bytes UTF-8; `reference_table` opcional textual não vazio, até 30 caracteres; `reference_id` opcional UUID. Campos opcionais aceitam null; entrada inválida retorna 400 |
 | notification | `GET /notification/` | JWT | Lista as notificações do usuário; filtros `read=sim|nao` e `type` |
 | notification | `GET /notification/unread/count` | JWT | Retorna `{ total }` de não lidas |
 | notification | `PATCH /notification/read-all` | JWT | Marca as notificações do usuário como lidas |
@@ -68,8 +68,12 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 - `send_message` recebe `{ conversationId, type?, content?, id_answer? }` e callback; exige usuário autenticado e verifica participação por `conversation_participant` antes de persistir.
 - Mensagens são emitidas como `new_message`; uma notificação `nova_mensagem` é persistida e emitida para cada outro participante da conversa.
 - Eventos de sincronização de notificação: `notification`, `notification_read`, `notifications_read_all` e `notification_deleted`.
-- `join_conversation` ainda aceita o ID recebido sem validar autenticação ou participação. Não trate a sala da conversa como protegida até corrigir essa lacuna.
+- `join_conversation` exige identidade autenticada, UUID válido e vínculo em `conversation_participant`; o callback retorna erro quando o usuário não participa.
 - HTTP e Socket.IO em `src/server.js` configuram origem CORS `http://localhost:3000`.
+
+Nas reservas, a mudança de status é decidida sob `SELECT ... FOR UPDATE`: dois aceites simultâneos retornam 200, mas apenas uma transição gera `reserva_aceita`. Repetir recusa/cancelamento de compra finalizada continua retornando 400, sem nova reposição de estoque ou aviso. `/cancel` revalida `pending` dentro da transação. Os formatos das respostas HTTP não mudam.
+
+Eventos de notificação não são reproduzidos automaticamente após reconectar: o cliente deve consultar `GET /notification/` (ou `?read=nao`) para recuperar avisos persistidos offline. A assinatura/expiração do JWT é validada no ingresso; não há desconexão automática na expiração posterior do token.
 
 ## Lacunas relevantes
 

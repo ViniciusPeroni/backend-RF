@@ -14,7 +14,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 - Compras podem ser criadas com itens; serviço verifica disponibilidade/estoque e atualiza estoque dentro de transação. Cancelamento/restauração e atualização de status também têm endpoints.
 - Categorias e estados do produto são enums do schema; consulte `RFScript.sql` e controller antes de adicionar valor.
 - CPF/CNPJ não são armazenados em claro: HMAC para deduplicação e cifra AES-256-GCM.
-- O envio de mensagens via Socket.IO persiste a mensagem e notifica os demais participantes; a entrada `join_conversation` ainda não valida participação.
+- O envio de mensagens via Socket.IO persiste a mensagem e notifica os demais participantes; `join_conversation` exige identidade autenticada e participação.
 
 ## Estado resumido
 
@@ -29,8 +29,8 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Localização | CRUD do dono + visão pública (RN10) | Todas as rotas com JWT exceto `GET /product/:productId` (token opcional); POST exige `userId` igual ao token (403); mascaramento antes da reserva aceita |
 | Logs | CRUD montado | Rota presente sem JWT explícito; não presumir seguro para exposição pública |
 | Documentos | Rotas JWT/admin | Há operações; revisão de ownership necessária para criação/listagens/metadados |
-| Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; `join_conversation` ainda não valida participação |
-| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD e contagem disponíveis; gatilhos atuais para mensagem, cadastro, OTP e criação de compra |
+| Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; entrada na conversa exige identidade e participação |
+| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD, contagem e leitura/exclusão sincronizadas; gatilhos de mensagem, cadastro, OTP, criação/aceite/recusa/cancelamento de compra; testes com transporte real e proteção contra aceite concorrente duplicado |
 | Reserva/negociação | Tabelas e fluxo de compra | Criação notifica `reserva_solicitada`; aceite/recusa notifica `reserva_aceita`/`reserva_recusada`; cancelamento notifica `sistema` aos vendedores |
 | Pagamento/comissão | Tabelas, sem integração/rotas correspondentes | Não afirmar pagamento disponível |
 | Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
