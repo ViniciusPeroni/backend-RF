@@ -1,8 +1,10 @@
+
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
 
 const productService = {
 
+    // CADASTRAR PRODUTO
     async createProduct(data) {
 
         await connect.promise().query(
@@ -42,7 +44,7 @@ const productService = {
         return data.id;
     },
 
-
+    // LISTAR PRODUTOS
     async getProducts() {
 
         const [rows] = await connect.promise().query(
@@ -67,7 +69,7 @@ const productService = {
         return rows;
     },
 
-
+    // BUSCAR PRODUTO POR ID
     async getProductById(id) {
 
         const [rows] = await connect.promise().query(
@@ -97,8 +99,8 @@ const productService = {
         return rows[0];
     },
 
-
-    async updateProduct(id, data) {
+    // ATUALIZAR PRODUTO
+    async updateProduct(id, data, userId) {
 
         const [result] = await connect.promise().query(
             `UPDATE product
@@ -114,7 +116,7 @@ const productService = {
                 weight = ?,
                 conservation_state = ?,
                 id_localization = ?
-            WHERE id = ?`,
+            WHERE id = ? AND id_user = ?`,
             [
                 data.name,
                 data.description || null,
@@ -127,10 +129,12 @@ const productService = {
                 data.weight,
                 data.conservation_state,
                 uuid.toBin(data.id_localization),
-                id
+                id,
+                uuid.toBin(userId)
             ]
         );
 
+        // Nenhum produto pertencente ao usuário foi encontrado
         if (result.affectedRows === 0) {
             return null;
         }
@@ -138,13 +142,16 @@ const productService = {
         return await productService.getProductById(id);
     },
 
-
-    async deleteProduct(id) {
+    // EXCLUIR PRODUTO
+    async deleteProduct(id, userId) {
 
         const [result] = await connect.promise().query(
             `DELETE FROM product
-             WHERE id = ?`,
-            [id]
+             WHERE id = ? AND id_user = ?`,
+            [
+                id,
+                uuid.toBin(userId)
+            ]
         );
 
         return result.affectedRows > 0;
