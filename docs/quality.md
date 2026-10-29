@@ -2,7 +2,16 @@
 
 ## Estado das ferramentas
 
-O `package.json` define somente `npm start` (`node --watch src/server.js`) e `npm run start:dev` (requer `nodemon` global, não declarado no projeto). Não há scripts/configuração de testes, lint, typecheck ou build. Não invente comandos como `npm test`.
+O `package.json` define somente `npm start` (`node --watch src/server.js`) e `npm run start:dev` (requer `nodemon` global, não declarado no projeto). Não há lint, build, typecheck ou comando `npm test`. Há um teste específico de pagamentos em `scripts/test-payment-integration.js`.
+
+No PowerShell, somente em banco de desenvolvimento:
+
+```powershell
+$env:RUN_PAYMENT_DB_TESTS='1'
+node scripts/test-payment-integration.js
+```
+
+O teste aplica somente a migração aditiva, cria fixtures exclusivas e remove-as ao final. Usa HTTP/MySQL reais e intercepta chamadas externas ao Mercado Pago; não valida o ambiente do provedor nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
 
 O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 
@@ -42,4 +51,4 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 
 ## Relato de qualidade
 
-Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. “Não há suíte automatizada” deve continuar explícito até que uma suíte seja realmente adicionada. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade.
+Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. Há teste específico de pagamentos, mas não suíte geral do backend. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade.

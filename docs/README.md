@@ -24,6 +24,8 @@ Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve
 
 ## Referência rápida
 
+Pagamentos: configuração do Mercado Pago, migração aditiva, contrato e cURLs no Postman em [payments.md](payments.md).
+
 - Stack: Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
 - Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.
 - Aplicações web e móvel são projetos independentes. Esta documentação cobre somente `backend-RF/`.

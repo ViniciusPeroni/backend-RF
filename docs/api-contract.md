@@ -45,6 +45,10 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 
 Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não derive contrato detalhado apenas desta tabela.
 
+## Pagamentos
+
+Pagamentos estão descritos em [payments.md](payments.md): cadastro, consultas por ID/compra, checkout, sincronização, cancelamento e reembolso total. Rotas exigem JWT e vínculo com o comprador; reembolso exige admin. Webhook público exige HMAC e consulta autenticada ao Mercado Pago. Validados 25 cenários locais e chamadas ao ambiente de teste do Mercado Pago para Pix, crédito e consultas. Débito recusado por restrição da conta; webhook externo ainda pendente de assinatura e URL pública.
+
 ## Socket.IO
 
 - `src/sockets/chatSocket.js` registra `join_conversation`; o ID recebido é usado para entrar na sala.
@@ -54,7 +58,7 @@ Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não der
 ## Lacunas relevantes
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
-- O schema inclui pagamento, disputa, avaliação, impacto ambiental, conversa/mensagem e notificação; não há contratos REST correspondentes no inventário atual.
+- Disputa, avaliação, impacto ambiental, conversa/mensagem e notificação não têm contratos REST neste inventário. Pagamentos têm módulo próprio: [payments.md](payments.md).
 - Tabela/enum `notification` não significa controller, rota ou gatilho existente.
 - Log/localização não têm JWT explícito nas rotas atuais. Rotas shopping-product e atualização de status da compra têm JWT, mas não verificam ownership/papel no controller atual. Documento exige revisão de ownership; produto update/delete também deve ser validado.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).
