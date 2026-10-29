@@ -5,7 +5,7 @@ const paymentService = require("./paymentService");
 const gatewayService = require("./paymentGatewayService");
 const paymentError = require("../utils/paymentError");
 
-function prepare(method, body, email) {
+async function prepare(method, body, email) {
     const provider = process.env.PAYMENT_PROVIDER;
     if (!["simulated", "mercado_pago"].includes(provider)) {
         throw paymentError("Provedor de pagamento não configurado.", 503);
@@ -17,13 +17,14 @@ function prepare(method, body, email) {
 
     const input = provider === "mercado_pago" ? mercadoPago.normalizeInput(method, body, email) : { method };
     const environment = provider === "mercado_pago" ? mercadoPago.configuration().environment : "simulated";
+    const account = provider === "mercado_pago" ? await mercadoPago.verifyAccount() : null;
 
     return {
         input,
         gateway: {
             provider,
             environment,
-            request_hash: crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex")
+            request_hash: crypto.createHash("sha256").update(JSON.stringify({ input, accountId: account?.id || null })).digest("hex")
         }
     };
 }
@@ -37,6 +38,20 @@ function assertEnvironment(gateway) {
 async function applyOrder(order, payment) {
     await gatewayService.applyCheckout(payment.id, await mercadoPago.normalizeOrder(order, payment));
     return gatewayService.getCheckout(payment.id);
+}
+
+async function reconcileOrder(payment) {
+    const gateway = await gatewayService.getGateway(payment.id);
+    assertEnvironment(gateway);
+    const order = gateway.order_id
+        ? await mercadoPago.getOrder(gateway.order_id)
+        : await mercadoPago.findOrder(await gatewayService.getPayment(payment.id));
+    if (!order) {
+        const error = paymentError("Order ainda não localizada. Use a sincronização novamente; não crie outra cobrança.", 409);
+        error.providerDetails = { payment_id: payment.id, reconciliation_required: true };
+        throw error;
+    }
+    return applyOrder(order, payment);
 }
 
 async function ownedPayment(id, userId) {
@@ -99,10 +114,32 @@ const paymentProviderService = {
             return gatewayService.getCheckout(payment.id);
         }
         assertEnvironment(gateway);
+        if (gateway.provider_status === "reconciliation_required") return reconcileOrder(payment);
         try {
             const order = gateway.order_id ? await mercadoPago.getOrder(gateway.order_id) : await mercadoPago.createOrder(payment, prepared.input);
             return await applyOrder(order, payment);
         } catch (error) {
+            if (error.providerDetails?.provider_status === 402) {
+                await gatewayService.requireReconciliation(payment.id);
+                error.providerDetails = { ...error.providerDetails, payment_id: payment.id, reconciliation_required: true };
+                let checkout;
+                try {
+                    checkout = await reconcileOrder(payment);
+                } catch (reconciliationError) {
+                    // Sem confirmação externa, preserva o pendente e impede novo POST de cobrança.
+                    throw error;
+                }
+                if (checkout.status !== "refused") return checkout;
+                error.message = "O Mercado Pago confirmou a falha do pagamento. Consulte status_detail para o motivo.";
+                error.providerDetails = {
+                    ...error.providerDetails,
+                    reconciliation_required: false,
+                    provider_order_id: checkout.provider_order_id,
+                    payment_status: checkout.status,
+                    status_detail: checkout.status_detail
+                };
+                throw error;
+            }
             if (error.definitive && !gateway.order_id) {
                 await gatewayService.applyCheckout(payment.id, {
                     provider: "mercado_pago", environment: gateway.environment,
@@ -118,8 +155,7 @@ const paymentProviderService = {
         const payment = await ownedPayment(id, userId);
         const gateway = await gatewayService.getGateway(id);
         assertEnvironment(gateway);
-        if (!gateway.order_id) throw paymentError("Order ainda não confirmada. Repita o cadastro com os mesmos dados.", 409);
-        const checkout = await applyOrder(await mercadoPago.getOrder(gateway.order_id), payment);
+        const checkout = await reconcileOrder(payment);
         return { payment: await ownedPayment(id, userId), checkout };
     },
     async cancel(id, userId) {

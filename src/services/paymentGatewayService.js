@@ -11,7 +11,7 @@ async function getGateway(id) {
 async function getPayment(id) {
     if (!uuid.isValid(id)) return null;
     const [rows] = await connect.promise().query(
-        `SELECT BIN_TO_UUID(p.id) AS id, p.value, p.method, p.status,
+        `SELECT BIN_TO_UUID(p.id) AS id, p.value, p.method, p.status, p.datetime,
                 BIN_TO_UUID(p.id_shopping) AS id_shopping,
                 BIN_TO_UUID(s.id_user) AS id_user, s.status AS shopping_status
          FROM payment p INNER JOIN shopping s ON s.id = p.id_shopping WHERE p.id = ?`, [uuid.toBin(id)]
@@ -28,6 +28,12 @@ async function restoreStock(conn, shoppingId) {
 
 module.exports = {
     getGateway, getPayment,
+    async requireReconciliation(id) {
+        await connect.promise().query(
+            `UPDATE payment_gateway SET provider_status = 'reconciliation_required', status_detail = 'awaiting_reconciliation'
+             WHERE id_payment = ? AND order_id IS NULL AND checkout IS NULL`, [uuid.toBin(id)]
+        );
+    },
     async getCheckout(id) {
         const [rows] = await connect.promise().query(
             `SELECT g.checkout, d.plan, p.status FROM payment_gateway g

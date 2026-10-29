@@ -25,23 +25,41 @@ const db = pool.promise();
 const gatewayService = require("../src/services/paymentGatewayService");
 const orders = new Map();
 const idempotency = new Map();
-const calls = { create: 0, cancel: 0, refund: 0 };
+const calls = { create: 0, submit: 0, cancel: 0, refund: 0 };
 let failNext;
 let timeoutAfterCreate = false;
+let processingFailure = false;
+let searchFailure = false;
+let duplicateSearch = false;
 let corruptAmount = false;
+let mockAccountId = "90001";
+let mockTestUser = true;
 
 axios.defaults.adapter = async config => {
     const url = new URL(config.url);
     assert.equal(url.origin, "https://api.mercadopago.com");
+    if (url.pathname === "/users/me") {
+        return { status: 200, statusText: "OK", data: { id: mockAccountId, tags: mockTestUser ? ["test_user"] : [] }, headers: {}, config };
+    }
     const data = typeof config.data === "string" ? JSON.parse(config.data) : config.data;
     const segments = url.pathname.split("/").filter(Boolean);
     let result;
+    if (config.method === "post" && segments.length === 2) calls.submit++;
     if (failNext) {
         const status = failNext;
         failNext = null;
-        throw new axios.AxiosError("Falha externa de teste", "ERR_BAD_RESPONSE", config, null, { status, data: {}, headers: {}, config });
+        const failureData = [402, 404].includes(status) ? { errors: [{ code: status === 404 ? "order_not_found" : "failed" }] } : {};
+        throw new axios.AxiosError("Falha externa de teste", "ERR_BAD_RESPONSE", config, null, { status, data: failureData, headers: {}, config });
     }
-    if (config.method === "post" && segments.length === 2) {
+    if (config.method === "get" && segments.length === 2) {
+        assert.ok(Number.isFinite(Date.parse(url.searchParams.get("begin_date"))));
+        assert.ok(Number.isFinite(Date.parse(url.searchParams.get("end_date"))));
+        assert.equal(url.searchParams.get("type"), "online");
+        if (searchFailure) throw new axios.AxiosError("Busca indisponível", "ERR_BAD_RESPONSE", config, null, { status: 503, data: {}, headers: {}, config });
+        const matching = [...orders.values()].filter(order => order.external_reference === url.searchParams.get("external_reference"));
+        if (duplicateSearch && matching.length) matching.push(structuredClone(matching[0]));
+        result = { data: matching, paging: { total: String(matching.length) } };
+    } else if (config.method === "post" && segments.length === 2) {
         const key = config.headers.get("X-Idempotency-Key");
         assert.equal(key, data.external_reference);
         if (!idempotency.has(key)) {
@@ -62,6 +80,14 @@ axios.defaults.adapter = async config => {
             orders.set(id, result);
         }
         result = orders.get(idempotency.get(key));
+        if (processingFailure) {
+            processingFailure = false;
+            result.status = "failed";
+            result.status_detail = "failed";
+            result.transactions.payments[0].status = "failed";
+            result.transactions.payments[0].status_detail = "processing_error";
+            throw new axios.AxiosError("Falha de processamento", "ERR_BAD_RESPONSE", config, null, { status: 402, data: { errors: [{ code: "failed" }] }, headers: {}, config });
+        }
         if (timeoutAfterCreate) {
             timeoutAfterCreate = false;
             throw new axios.AxiosError("Timeout de teste", "ECONNABORTED", config);
@@ -427,6 +453,151 @@ async function cleanup() {
             assert.equal(plan.sellers.reduce((sum, item) => sum + cents(item.commission_amount), 0), 2);
             assert.equal(plan.sellers.reduce((sum, item) => sum + cents(item.amount_before_provider_fees), 0), 28);
             assert.throws(() => distribution.calculate([{ seller_id: sellerIds[0], value: "0.31" }], "0.30"), { status: 409 });
+        });
+        await check("credencial de produção em ambiente de teste não cria pagamento", async () => {
+            const id = await shopping();
+            const previousToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+            mockTestUser = false;
+            process.env.MERCADO_PAGO_ACCESS_TOKEN = "CREDENCIAL_FICTICIA_DE_OUTRO_AMBIENTE";
+            try {
+                const response = await create(id);
+                assert.equal(response.status, 409);
+                assert.equal((await request("GET", `/payment/shopping/${id}`)).body.length, 0);
+            } finally {
+                mockTestUser = true;
+                process.env.MERCADO_PAGO_ACCESS_TOKEN = previousToken;
+            }
+        });
+        await check("troca da conta recebedora não reaproveita pendente", async () => {
+            const id = await shopping();
+            const created = await create(id);
+            assert.equal(created.status, 201);
+            const previousToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+            const before = calls.create;
+            mockAccountId = "90002";
+            process.env.MERCADO_PAGO_ACCESS_TOKEN = "CREDENCIAL_FICTICIA_DE_OUTRA_CONTA";
+            try {
+                assert.equal((await create(id)).status, 409);
+                assert.equal(calls.create, before);
+            } finally {
+                mockAccountId = "90001";
+                process.env.MERCADO_PAGO_ACCESS_TOKEN = previousToken;
+            }
+        });
+        await check("order de outra conta retorna motivo claro em vez de falha genérica", async () => {
+            const created = await create(await shopping());
+            assert.equal(created.status, 201);
+            failNext = 404;
+            const response = await request("POST", `/payment/${created.body.payment.id}/sync`);
+            assert.equal(response.status, 409);
+            assert.equal(response.body.provider_status, 404);
+            assert.equal(response.body.provider_code, "order_not_found");
+        });
+        await check("erro 402 é informado sem descartar cobrança que pode existir", async () => {
+            const id = await shopping();
+            failNext = 402;
+            const response = await create(id);
+            assert.equal(response.status, 402);
+            assert.equal(response.body.provider_code, "failed");
+            const payments = await request("GET", `/payment/shopping/${id}`);
+            assert.equal(payments.body.length, 1);
+            assert.equal(payments.body[0].status, "pending");
+            assert.equal(response.body.payment_id, payments.body[0].id);
+            assert.equal(response.body.reconciliation_required, true);
+            const before = calls.submit;
+            assert.equal((await create(id)).status, 409);
+            assert.equal((await request("POST", `/payment/${payments.body[0].id}/sync`)).status, 409);
+            assert.equal(calls.submit, before);
+        });
+        await check("402 com order criada concilia Pix e crédito e informa motivo sem duplicar", async () => {
+            for (const method of ["pix", "credit_card"]) {
+                const id = await shopping();
+                const before = await stock();
+                processingFailure = true;
+                const response = await create(id, method);
+                assert.equal(response.status, 402);
+                assert.equal(response.body.provider_code, "failed");
+                assert.equal(response.body.reconciliation_required, false);
+                assert.equal(response.body.payment_status, "refused");
+                assert.equal(response.body.status_detail, "processing_error");
+                const paymentId = response.body.payment_id;
+                const gateway = await gatewayService.getGateway(paymentId);
+                assert.equal(gateway.order_id, response.body.provider_order_id);
+                assert.ok(gateway.transaction_id);
+                assert.equal(gateway.provider_status, "failed");
+                assert.equal(gateway.status_detail, "processing_error");
+                const submits = calls.submit;
+                for (let i = 0; i < 2; i++) {
+                    const synced = await request("POST", `/payment/${paymentId}/sync`);
+                    assert.equal(synced.status, 200);
+                    assert.equal(synced.body.payment.status, "refused");
+                    assert.equal(synced.body.checkout.qr_code, null);
+                    assert.equal(synced.body.checkout.qr_code_base64, null);
+                }
+                assert.equal(calls.submit, submits);
+                assert.equal((await request("GET", `/shopping/${id}`)).body.status, "pending");
+                assert.equal(await stock(), before);
+            }
+        });
+        await check("busca indisponível após 402 bloqueia reenvio e permite conciliar depois", async () => {
+            const id = await shopping();
+            processingFailure = true;
+            searchFailure = true;
+            let paymentId;
+            const submits = calls.submit;
+            try {
+                const response = await create(id);
+                assert.equal(response.status, 402);
+                paymentId = response.body.payment_id;
+                assert.equal(response.body.reconciliation_required, true);
+                assert.equal((await request("GET", `/payment/${paymentId}`)).body.status, "pending");
+                assert.equal((await create(id)).status, 503);
+                assert.equal(calls.submit, submits + 1);
+            } finally {
+                searchFailure = false;
+            }
+            const response = await create(id);
+            assert.equal(response.status, 200);
+            assert.equal(response.body.payment.id, paymentId);
+            assert.equal(response.body.payment.status, "refused");
+            assert.equal(calls.submit, submits + 1);
+        });
+        await check("sync recupera order antiga sem ID e mantém autorização do proprietário", async () => {
+            const id = await shopping();
+            timeoutAfterCreate = true;
+            assert.equal((await create(id)).status, 503);
+            const paymentId = (await request("GET", `/payment/shopping/${id}`)).body[0].id;
+            const submits = calls.submit;
+            assert.equal((await request("POST", `/payment/${paymentId}/sync`, undefined, otherToken)).status, 404);
+            const synced = await request("POST", `/payment/${paymentId}/sync`);
+            assert.equal(synced.status, 200);
+            assert.equal(synced.body.payment.status, "pending");
+            assert.ok(synced.body.checkout.provider_order_id);
+            assert.ok(synced.body.checkout.qr_code_base64);
+            assert.equal(calls.submit, submits);
+        });
+        await check("conciliação não vincula order duplicada ou de valor divergente", async () => {
+            const id = await shopping();
+            processingFailure = true;
+            duplicateSearch = true;
+            let paymentId;
+            try {
+                const response = await create(id);
+                assert.equal(response.status, 402);
+                paymentId = response.body.payment_id;
+                assert.equal((await request("POST", `/payment/${paymentId}/sync`)).status, 409);
+            } finally {
+                duplicateSearch = false;
+            }
+            corruptAmount = true;
+            try {
+                assert.equal((await request("POST", `/payment/${paymentId}/sync`)).status, 502);
+                assert.equal((await request("GET", `/payment/${paymentId}`)).body.status, "pending");
+                assert.equal((await gatewayService.getGateway(paymentId)).order_id, null);
+            } finally {
+                corruptAmount = false;
+            }
+            assert.equal((await request("POST", `/payment/${paymentId}/sync`)).body.payment.status, "refused");
         });
         console.log(`PASSOU: ${passed} cenários; HTTP + MySQL reais, Mercado Pago interceptado, zero cobranças externas.`);
     } catch (error) {

@@ -30,7 +30,7 @@ Prefixo: `/api/reaproveitafranca`. Todas as rotas abaixo exigem JWT, exceto webh
 | GET /payment/:id | Pagamento local; mantém o contrato anterior |
 | GET /payment/shopping/:shoppingId | Pagamentos locais da compra; mantém o contrato anterior |
 | GET /payment/:id/checkout | `{ payment, checkout }`, dados persistidos sem chamada externa |
-| POST /payment/:id/sync | Consulta Orders no Mercado Pago e atualiza banco; retorna `{ payment, checkout }` |
+| POST /payment/:id/sync | Consulta Orders no Mercado Pago e atualiza banco; busca pela referência local se o ID externo ainda não foi salvo; retorna `{ payment, checkout }` |
 | POST /payment/:id/cancel | Cancela pendente no Mercado Pago e consulta confirmação |
 | POST /payment/:id/refund | Reembolso total; somente admin; compra ainda não concluída |
 | POST /payment/:id/simulate | Somente provedor simulado fora de produção; `{ status: "approved" ou "refused" }`; exige dono do pagamento |
@@ -50,6 +50,10 @@ Métodos locais: `pix`, `credit_card`, `debit_card`. Pix retorna `checkout.qr_co
 - O módulo de compras foi preservado por solicitação de Bryan. Sua rota genérica de status tem uma falha anterior de autorização, e cancelar uma compra localmente não cancela a cobrança no Mercado Pago. Use cancelamento/reembolso do pagamento; uma aprovação posterior ao cancelamento local retorna `checkout.needs_review: true` para reconciliação/reembolso administrativo, sem reabrir a compra nem baixar estoque novamente. Essa pendência de integração com compras impede considerar o conjunto pronto para produção.
 - A comissão planejada usa `PAYMENT_COMMISSION_PERCENT`, padrão de 5%, sobre o valor dos itens no banco. O plano é persistido atomicamente em `payment_distribution` quando o pagamento é criado e retornado em `checkout.distribution`. Percentual e valores históricos não mudam ao repetir a requisição. O cálculo usa centavos e conserva a soma entre fornecedores, inclusive no arredondamento.
 - Esse plano não transfere dinheiro, não desconta comissão no Mercado Pago e não registra comissão como recebida. `transfers_executed` é false e `settlement_status` é `not_configured` (ou `not_applicable` para pagamento recusado/reembolsado). Valores dos fornecedores são anteriores às taxas do provedor. O repasse real depende da vinculação dos vendedores e de uma modalidade de split compatível/habilitada; a Orders API atual não recebe `application_fee` como se fosse a Payments API.
+- A API consulta a conta do Access Token e exige coerência entre conta de teste e `MERCADO_PAGO_ENV=test`, ou conta real e `production`, antes de criar o pagamento. O hash de repetição também considera a conta recebedora. Registros antigos não são convertidos por trocar a chave ou o ambiente.
+- Uma consulta externa 404 retorna conflito local 409 com `provider_code: order_not_found`, evitando tratar troca de conta como indisponibilidade. Após 402 na criação, a API busca a order por `external_reference` (ID local), com intervalo de datas obrigatório, e consulta seu detalhe antes de atualizar o banco. Exige uma única order, referência, valor e método compatíveis. Não envia outra cobrança nessa conciliação.
+- Se a order confirmar falha, persiste IDs externos, `refused` e motivo em `checkout.status_detail`; a resposta 402 inclui `payment_id`, `provider_order_id`, `payment_status`, `status_detail` e `reconciliation_required: false`. A compra continua pendente com estoque reservado, permitindo uma nova tentativa após corrigir a causa.
+- Se a consulta após 402 falhar ou ainda não localizar a order, mantém o pagamento pendente e grava `reconciliation_required` no vínculo. A resposta inclui `payment_id` e `reconciliation_required: true`. Repetir o cadastro desse pendente só consulta a order; não reenvia o POST externo. Use `/payment/:id/sync` até confirmar o resultado. Essa rota também recupera pagamentos anteriores que ficaram sem o ID da order. Timeouts/5xx na criação continuam permitindo repetição com a mesma chave/dados.
 - Reembolsos parciais, chargebacks e salvamento de cartões não têm fluxo de gestão implementado; os detalhes externos não equivalem a reembolso integral.
 
 ## cURLs para importar no Postman
@@ -88,6 +92,8 @@ curl '{{baseUrl}}/payment/shopping/{{compraId}}' --header 'Authorization: Bearer
 curl '{{baseUrl}}/payment/{{pagamentoId}}/checkout' --header 'Authorization: Bearer {{jwt}}'
 curl --request POST '{{baseUrl}}/payment/{{pagamentoId}}/sync' --header 'Authorization: Bearer {{jwt}}'
 ```
+
+Após erro 402, use `payment_id` da resposta como `pagamentoId`. Para tentativas antigas sem esse campo, consulte `/payment/shopping/{{compraId}}` e copie o ID local. Sincronize e consulte o checkout pelas chamadas acima; não crie nova compra para tentar recuperar uma cobrança anterior. A chave Pix deve estar cadastrada na conta recebedora para oferecer Pix em produção; uma falha `processing_error` é genérica e, sozinha, não comprova ausência da chave.
 
 Cancelamento e reembolso são operações distintas. Para testes use somente credenciais de teste, em compras preparadas para cada cenário:
 
@@ -136,6 +142,8 @@ O script `scripts/test-payment-integration.js` usa HTTP local, banco MySQL confi
 
 Validação realizada em 29/10/2026:
 
+- Correção do 402: 35 cenários locais aprovados, com HTTP/MySQL reais e Mercado Pago interceptado. Cobrem Pix/crédito com order criada apesar do 402, persistência do motivo, recuperação sem ID externo, autorização do proprietário, busca indisponível, bloqueio de reenvio e rejeição de orders duplicadas/divergentes. Fixtures removidas ao final.
+- A tentativa Pix de produção que motivou a correção foi conciliada por três GETs externos: `failed/processing_error`, pagamento local `refused`, IDs externos salvos, sem QR Code. Compra e estoque preservados; nenhum POST externo ou nova cobrança. Isso confirma a conciliação dessa falha, não o recebimento de um Pix em produção.
 - 25 cenários locais aprovados com HTTP/MySQL reais e transporte do Mercado Pago interceptado.
 - Credencial autenticada pela API do Mercado Pago e confirmada como usuário de teste.
 - Pix: criação 201, QR Code e PNG retornados, checkout/listagem/sincronização 200 e repetição com o mesmo ID. O pagamento estava pendente na consulta; não foi comprovada aprovação automática do Pix.
@@ -145,6 +153,6 @@ Validação realizada em 29/10/2026:
 
 Pendências: assinatura secreta e URL pública para validar o webhook externo; habilitação do débito na conta; validação externa de cancelamento/reembolso e do ciclo completo do Pix. A existência das rotas não comprova esses cenários no provedor.
 
-Documentação oficial: [Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/websites/pix), [cartões](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/websites/cards), [webhooks](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/notifications), [teste Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/integration-test/pix).
+Documentação oficial: [Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/websites/pix), [cartões](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-integration/websites/cards), [webhooks](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/notifications), [teste Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/integration-test/pix), [buscar order](https://www.mercadopago.com.br/developers/pt/reference/online-payments/checkout-api/search-order/get), [status da transação](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/payment-management/status/transaction-status), [requisitos Pix](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/overview?scope=prod).
 
 HMAC conferido com o [validador do SDK oficial](https://github.com/mercadopago/sdk-nodejs/blob/master/src/utils/webhook/index.ts): `id:{data.id};request-id:{x-request-id};ts:{ts};`, preservando a caixa do ID recebido. Comparação em tempo constante; notificações repetidas usam consulta atual do provedor e transições locais idempotentes.

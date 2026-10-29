@@ -7,6 +7,13 @@ const uuid = require("../utils/uuid");
 
 const VALID_METHODS = ["pix", "credit_card", "debit_card"];
 
+function paymentFailure(error, fallback) {
+    return {
+        error: error.status ? error.message : fallback,
+        ...(error.providerDetails || {})
+    };
+}
+
 const createPayment = async (req, res) => {
     try {
         const { id_shopping, method } = req.body || {};
@@ -63,7 +70,7 @@ const createPayment = async (req, res) => {
             });
         }
 
-        const prepared = paymentProviderService.prepare(method, req.body || {}, shopping.user_email);
+        const prepared = await paymentProviderService.prepare(method, req.body || {}, shopping.user_email);
         const result = await paymentService.createPayment({
             id_shopping: shopping.id,
             userId: req.userId,
@@ -78,17 +85,15 @@ const createPayment = async (req, res) => {
 
         return res.status(reused ? 200 : 201).json({
             message: reused
-                ? "Pagamento pendente recuperado com sucesso."
-                : "Pagamento pendente registrado com sucesso.",
+                ? "Pagamento recuperado com sucesso."
+                : "Pagamento registrado com sucesso.",
             payment: updatedPayment,
             checkout
         });
 
     } catch (error) {
         if (error.status) {
-            return res.status(error.status).json({
-                error: error.message
-            });
+            return res.status(error.status).json(paymentFailure(error, "Erro ao registrar pagamento."));
         }
 
         console.error(
@@ -207,7 +212,7 @@ function paymentOperation(operation) {
             return res.status(200).json(await paymentProviderService[operation](req.params.id, req.userId, req.body?.status));
         } catch (error) {
             if (!error.status) console.error("Erro na operação de pagamento:", error.code || error.name);
-            return res.status(error.status || 500).json({ error: error.status ? error.message : "Erro ao processar pagamento." });
+            return res.status(error.status || 500).json(paymentFailure(error, "Erro ao processar pagamento."));
         }
     };
 }
@@ -230,7 +235,7 @@ const webhook = async (req, res) => {
         return res.status(200).json({ received: true });
     } catch (error) {
         if (!error.status) console.error("Erro no webhook de pagamento:", error.code || error.name);
-        return res.status(error.status || 500).json({ error: error.status ? error.message : "Falha ao processar webhook." });
+        return res.status(error.status || 500).json(paymentFailure(error, "Falha ao processar webhook."));
     }
 };
 

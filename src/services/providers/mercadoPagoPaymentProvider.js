@@ -2,6 +2,7 @@ const axios = require("axios");
 const QRCode = require("qrcode");
 const crypto = require("crypto");
 const paymentError = require("../../utils/paymentError");
+let accountCache;
 
 function configuration() {
     const environment = process.env.MERCADO_PAGO_ENV;
@@ -11,8 +12,73 @@ function configuration() {
     return { environment, token: process.env.MERCADO_PAGO_ACCESS_TOKEN };
 }
 
+function providerFailure(error) {
+    const status = error.response?.status;
+    const data = error.response?.data;
+    const values = [data?.code, data?.error, ...(Array.isArray(data?.errors) ? data.errors.map(item => item.code) : [])];
+    const code = values.find(value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value));
+    let failure;
+
+    if (status === 404) {
+        failure = paymentError("Pagamento não encontrado na conta Mercado Pago atual. Confira se ele foi criado em outra conta ou no ambiente de teste. Não recrie a cobrança antes de conciliar.", 409);
+    } else if (status === 402) {
+        failure = paymentError("O Mercado Pago informou falha no processamento da transação. Consulte a order antes de criar outra tentativa.", 402);
+    } else if ([400, 422].includes(status)) {
+        failure = paymentError("O Mercado Pago rejeitou os dados ou a operação. Confira o código retornado pelo provedor.", 422);
+        failure.definitive = true;
+    } else if (status === 409) {
+        failure = paymentError("Operação em conflito no Mercado Pago. Consulte o pagamento antes de tentar novamente.", 409);
+    } else if ([401, 403].includes(status)) {
+        failure = paymentError("Credenciais ou permissões do Mercado Pago inválidas.", 503);
+    } else {
+        failure = paymentError("Não foi possível confirmar a resposta do Mercado Pago. Repita com os mesmos dados; não crie outra cobrança.", 503);
+    }
+
+    failure.providerDetails = {
+        ...(status ? { provider_status: status } : {}),
+        ...(code ? { provider_code: code } : {})
+    };
+
+    return failure;
+}
+
+async function verifyAccount() {
+    const config = configuration();
+    if (accountCache?.token === config.token && accountCache.environment === config.environment && accountCache.expires > Date.now()) {
+        return accountCache.account;
+    }
+
+    let data;
+    try {
+        const response = await axios({
+            method: "GET",
+            url: "https://api.mercadopago.com/users/me",
+            timeout: 10000,
+            maxRedirects: 0,
+            headers: { Authorization: `Bearer ${config.token}` }
+        });
+        data = response.data;
+    } catch (error) {
+        throw providerFailure(error);
+    }
+
+    if (!data?.id || !Array.isArray(data.tags)) {
+        throw paymentError("Não foi possível identificar a conta do Mercado Pago.", 503);
+    }
+
+    const testUser = data.tags.includes("test_user");
+    if ((config.environment === "test") !== testUser) {
+        throw paymentError("A conta Mercado Pago não corresponde a MERCADO_PAGO_ENV. Use test com usuário de teste ou production com conta real. Trocar a chave não converte pagamentos antigos.", 409);
+    }
+
+    const account = { id: String(data.id), environment: config.environment };
+    accountCache = { token: config.token, environment: config.environment, account, expires: Date.now() + 60000 };
+    return account;
+}
+
 async function request(method, path, body, key) {
     const config = configuration();
+    await verifyAccount();
     try {
         const response = await axios({
             method,
@@ -28,19 +94,7 @@ async function request(method, path, body, key) {
         });
         return response.data;
     } catch (error) {
-        const status = error.response?.status;
-        if ([400, 422].includes(status)) {
-            const rejection = paymentError("Mercado Pago rejeitou os dados. Confira o pagador, o método e o token do cartão antes de tentar novamente.", 422);
-            rejection.definitive = true;
-            throw rejection;
-        }
-        if (status === 409) {
-            throw paymentError("Operação em conflito no Mercado Pago. Consulte o pagamento antes de tentar novamente.", 409);
-        }
-        if ([401, 403].includes(status)) {
-            throw paymentError("Credenciais ou permissões do Mercado Pago inválidas.", 503);
-        }
-        throw paymentError("Não foi possível confirmar a resposta do Mercado Pago. Repita com os mesmos dados; não crie outra cobrança.", 503);
+        throw providerFailure(error);
     }
 }
 
@@ -146,7 +200,7 @@ function validateWebhook(req) {
 }
 
 module.exports = {
-    configuration, normalizeInput, normalizeOrder, validateWebhook,
+    configuration, verifyAccount, normalizeInput, normalizeOrder, validateWebhook,
     createOrder(payment, input) {
         const amount = Number(payment.value).toFixed(2);
         return request("POST", "", {
@@ -157,6 +211,28 @@ module.exports = {
         }, payment.id);
     },
     getOrder(id) { return request("GET", orderPath(id)); },
+    async findOrder(payment) {
+        const created = new Date(payment.datetime).getTime();
+        if (!Number.isFinite(created)) throw paymentError("Data do pagamento inválida para conciliação.", 409);
+        const params = new URLSearchParams({
+            begin_date: new Date(created - 86400000).toISOString(),
+            end_date: new Date().toISOString(),
+            external_reference: payment.id,
+            type: "online", page_size: "2"
+        });
+        const result = await request("GET", `?${params}`);
+        if (!Array.isArray(result?.data)) throw paymentError("Resposta de busca de orders inválida.", 502);
+        const total = Number(result.paging?.total);
+        if (!Number.isInteger(total) || total < 0) throw paymentError("Paginação de orders inválida.", 502);
+        if (total > 1 || result.data.length > 1) throw paymentError("Mais de uma order encontrada. Conciliação manual necessária; não crie outra cobrança.", 409);
+        if (total !== result.data.length) throw paymentError("Busca de orders incompleta. Consulte novamente antes de criar outra cobrança.", 502);
+        if (!total) return null;
+        const order = result.data[0];
+        if (String(order.external_reference).toLowerCase() !== payment.id.toLowerCase()) {
+            throw paymentError("Referência divergente na busca da order.", 502);
+        }
+        return request("GET", orderPath(order.id));
+    },
     cancelOrder(id, paymentId) { return request("POST", `${orderPath(id)}/cancel`, undefined, `${paymentId}-cancel`); },
     refundOrder(id, paymentId) { return request("POST", `${orderPath(id)}/refund`, undefined, `${paymentId}-refund`); }
 };
