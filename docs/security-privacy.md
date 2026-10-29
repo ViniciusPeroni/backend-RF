@@ -27,8 +27,15 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 
 - O handshake usa JWT para a sala individual `user:<uuid>`; a conexão anônima ainda pode ser estabelecida, mas não é associada a uma sala de usuário.
 - `send_message` exige JWT válido e valida participação usando `conversation_participant` antes de gravar.
-- `join_conversation` ainda aceita qualquer ID sem autenticação ou validação de participante. Isso pode expor eventos privados da sala; não trate esse evento como seguro.
+- `join_conversation` exige identidade autenticada, UUID válido e vínculo na conversa antes de associar o socket à sala.
 - Mensagens/notificações direcionadas a usuários são emitidas para as salas individuais. Não envie tokens em URLs; prefira `auth: { token }` no handshake.
+- O JWT é verificado na conexão; a implementação não desconecta automaticamente sessões cujo token expire depois do ingresso. Os testes cobrem token já expirado no ingresso, não revogação/expiração durante sessão ativa.
+
+## Notificações e concorrência
+
+- O POST de notificação aceita somente objeto JSON, título textual não vazio e campos opcionais com tipos validados; `content` respeita a capacidade TEXT (65.535 bytes UTF-8). Destinatário é sempre o token, nunca `id_user` do body.
+- Os gatilhos de reserva usam a mudança de status apurada sob lock transacional para evitar duplicidade em aceites concorrentes. Cancelamento revalida `pending` sob o mesmo lock; recusa/cancelamento não repõem estoque duas vezes.
+- O serviço de notificação não oferece deduplicação genérica nem entrega garantida após falha do processo; futuros fluxos devem implementar suas transições idempotentes e não tratar uma consulta prévia fora da transação como proteção suficiente.
 
 ## Configuração e riscos operacionais
 

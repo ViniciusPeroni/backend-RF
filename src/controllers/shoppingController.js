@@ -220,9 +220,16 @@ const cancelShopping = async (req, res) => {
             });
         }
 
-        const updated = await shoppingService.updateStatus(id, "cancelled");
+        const transition = await shoppingService.updateStatus(id, "cancelled", { onlyPending: true });
 
-        await notifySellersAboutCancellation(updated, getActorName(req, "O comprador"));
+        if (!transition) {
+            return res.status(404).json({ error: "Compra não encontrada." });
+        }
+
+        const { shopping: updated, changed } = transition;
+        if (changed) {
+            await notifySellersAboutCancellation(updated, getActorName(req, "O comprador"));
+        }
 
         return res.status(200).json({
             message: "Compra cancelada com sucesso. O estoque dos produtos foi restaurado.",
@@ -292,19 +299,21 @@ const updateStatus = async (req, res) => {
             }
         }
 
-        const updated = await shoppingService.updateStatus(id, status);
+        const transition = await shoppingService.updateStatus(id, status);
 
-        if (!updated) {
+        if (!transition) {
             return res.status(404).json({
                 error: "Compra não encontrada."
             });
         }
 
-        if (["accepted", "refused"].includes(status) && shopping.status !== status) {
+        const { shopping: updated, changed } = transition;
+
+        if (["accepted", "refused"].includes(status) && changed) {
             await notifyBuyerAboutStatus(updated, status, getActorName(req, "O vendedor"));
         }
 
-        if (status === "cancelled" && shopping.status !== "cancelled") {
+        if (status === "cancelled" && changed) {
             await notifySellersAboutCancellation(updated, getActorName(req, "O comprador"));
         }
 

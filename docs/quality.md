@@ -24,13 +24,15 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
 - confirme persistência e isolamento por usuário com dados sintéticos;
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
-- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento.
+- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento e Node.js 22+ com WebSocket nativo. Cobre validação, ownership, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
 - para cartões, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:card`. Também cria e remove usuários sintéticos e cobre validação, ownership e não exposição de `payment_token`.
 
 ### Socket.IO e provedores externos
 
 - A página `src/sockets/test/socket-test.html` testa somente conexão e `join_conversation`; ela não testa o handshake autenticado, `send_message` ou notificações.
 - Separe comportamento simulado de entrega SMTP/OAuth real; não reporte integração externa sem evidência do provedor.
+- A suíte de notificações mantém casos com IO simulado e também sobe Socket.IO real no servidor HTTP local: verifica os quatro eventos de notificação em duas sessões do dono, isolamento de outro usuário/anônimo/JWT inválido ou já expirado, reconexão e recuperação HTTP de avisos persistidos offline. `tests/helpers/notificationSocketClient.js` implementa somente o transporte WebSocket Engine.IO v4/namespace padrão para teste, sem polling/retry e sem nova dependência.
+- Cadastro tem envio de OTP substituído no teste; não exercita SMTP/OAuth reais. O teste de falha de notificação injeta uma rejeição do serviço para comprovar que a compra continua confirmada.
 - Não conecte teste a dados pessoais ou produção.
 
 ## Níveis de evidência

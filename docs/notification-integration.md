@@ -226,14 +226,15 @@ const connect = require('../db/connect');
 
 ## Idempotência e duplicidade
 
-- Notifique apenas em transições reais de estado. Exemplo já implementado: comparar `shopping.status` antes e depois de atualizar.
+- Notifique apenas em transições reais de estado. Em compras, `shoppingService.updateStatus` decide `{ previousStatus, changed }` sob `SELECT ... FOR UPDATE` e devolve a compra lida na mesma transação; o controller só notifica se `changed`. Comparar apenas uma leitura anterior feita fora da transação permite avisos duplicados em requisições simultâneas.
 - Repetir a mesma ação não deve criar outra notificação.
+- Aceite repetido permanece 200 sem novo aviso; recusa/cancelamento em compra finalizada permanecem 400. `/cancel` revalida `pending` dentro da transação. Recusa/cancelamento restauram estoque somente uma vez.
 - Webhooks de pagamento devem ser idempotentes; registre o identificador do evento ou verifique o status anterior antes de notificar.
 - Não emita o evento `notification` manualmente: `notifyUser` já faz isso.
 
 ## Verificação
 
-Com banco de desenvolvimento e dependências instaladas:
+Com banco de desenvolvimento, dependências instaladas e Node.js 22+ (WebSocket nativo):
 
 ```powershell
 $env:RF_TEST_ALLOW_DB="1"; npm run test:notification
@@ -245,6 +246,10 @@ O script `tests/notification.integration.js`:
 - cria usuários, produtos, conversa e compras sintéticas;
 - testa CRUD de notificações, ownership, filtros, contagem, read-all, exclusão e eventos Socket.IO;
 - testa cadastro, OTP, nova mensagem e os gatilhos de compra/reserva;
+- rejeita payloads com tipos inválidos e conteúdo acima de 65.535 bytes UTF-8 antes de chegar ao MySQL;
+- força leituras concorrentes de reservas e testa aviso único, estoque e cancelamento com leitura desatualizada;
+- conecta clientes WebSocket ao Socket.IO real para testar `notification`, `notification_read`, `notifications_read_all` e `notification_deleted` em duas sessões do dono, sem entrega a outro usuário, anônimo ou JWT inválido/já expirado;
+- verifica recuperação por GET de uma notificação criada offline e entrega de novos eventos após reconectar;
 - remove os dados sintéticos no final.
 
 Se `google-auth-library` não estiver instalada, o caso de cadastro é marcado como `SKIP` e o restante da suíte continua. Rode `npm install` para executar a cobertura completa.
@@ -255,4 +260,8 @@ Se `google-auth-library` não estiver instalada, o caso de cadastro é marcado c
 - O documento de requisitos não define quem abre disputa nem quais notificações devem existir. A regra de abertura por qualquer parte é inferência a partir do RF10 e do schema; confirme com o orientador antes de implementar.
 - Recusa e estorno de pagamento não têm tipo de notificação definido; se necessário, use `sistema` e registre a decisão.
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.
-- `join_conversation` ainda não valida participação; isso é uma lacuna de segurança do chat, não do serviço de notificação.
+- `join_conversation` agora valida identidade, UUID e participação; versões anteriores destes guias descreviam a implementação antiga.
+- Socket.IO não oferece replay automático dos avisos offline: depois de reconectar, o cliente consulta `GET /notification/` ou `?read=nao`. Os eventos em tempo real não substituem essa leitura.
+- Não há outbox, fila de retry ou garantia de entrega após queda entre commit de domínio e gravação da notificação. A proteção de concorrência das reservas não é deduplicação global do serviço.
+- JWT é validado no ingresso; expiração posterior não desconecta automaticamente sessões abertas. O teste de token expirado cobre o ingresso, não revogação contínua.
+- Transporte real local não comprova integração com front/mobile, push com app fechado ou serviços SMTP/OAuth externos.
