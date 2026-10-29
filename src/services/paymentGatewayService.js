@@ -29,9 +29,23 @@ async function restoreStock(conn, shoppingId) {
 module.exports = {
     getGateway, getPayment,
     async getCheckout(id) {
-        const [rows] = await connect.promise().query("SELECT checkout FROM payment_gateway WHERE id_payment = ?", [uuid.toBin(id)]);
+        const [rows] = await connect.promise().query(
+            `SELECT g.checkout, d.plan, p.status FROM payment_gateway g
+             INNER JOIN payment p ON p.id = g.id_payment
+             LEFT JOIN payment_distribution d ON d.id_payment = g.id_payment
+             WHERE g.id_payment = ?`, [uuid.toBin(id)]
+        );
         const value = rows[0]?.checkout;
-        return typeof value === "string" ? JSON.parse(value) : value || null;
+        if (!value) return null;
+        const checkout = typeof value === "string" ? JSON.parse(value) : value;
+        const plan = typeof rows[0].plan === "string" ? JSON.parse(rows[0].plan) : rows[0].plan;
+        if (plan) {
+            checkout.distribution = {
+                ...plan,
+                settlement_status: ["refused", "refunded"].includes(rows[0].status) ? "not_applicable" : "not_configured"
+            };
+        }
+        return checkout;
     },
     async applyCheckout(id, checkout) {
         const payment = await getPayment(id);

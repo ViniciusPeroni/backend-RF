@@ -11,9 +11,10 @@ PAYMENT_PROVIDER=mercado_pago
 MERCADO_PAGO_ENV=test
 MERCADO_PAGO_ACCESS_TOKEN=
 MERCADO_PAGO_WEBHOOK_SECRET=
+PAYMENT_COMMISSION_PERCENT=5
 ```
 
-4. Execute a migração aditiva `src/mysql-init/migration_payment_gateway.sql` no banco configurado. **Não execute RFScript.sql** em banco existente.
+4. Execute as migrações aditivas `src/mysql-init/migration_payment_gateway.sql` e `src/mysql-init/migration_payment_distribution.sql` no banco configurado. **Não execute RFScript.sql** em banco existente.
 5. Reinicie a API. O padrão continua `simulated`; esse provedor é bloqueado com `NODE_ENV=production`.
 6. Publique uma URL HTTPS de desenvolvimento para a API e configure no painel o tópico **Orders**, ambiente Teste, com URL `https://SEU_HOST/api/reaproveitafranca/payment/webhook/mercado-pago`. Copie a assinatura secreta desse webhook para o `.env` e reinicie. Localhost não recebe chamadas externas.
 
@@ -47,7 +48,9 @@ Métodos locais: `pix`, `credit_card`, `debit_card`. Pix retorna `checkout.qr_co
 - `processed/accredited` confirma pagamento `approved` e compra `accepted`. A retirada/entrega e a conclusão não são confirmadas pelo webhook.
 - Falha/recusa deixa compra pendente e permite nova tentativa; estoque continua reservado. Cancelamento/expiração confirmados e reembolso integral cancelam compra e devolvem estoque uma única vez. Notificações repetidas não duplicam a devolução. Respostas atrasadas não rebaixam estados finais.
 - O módulo de compras foi preservado por solicitação de Bryan. Sua rota genérica de status tem uma falha anterior de autorização, e cancelar uma compra localmente não cancela a cobrança no Mercado Pago. Use cancelamento/reembolso do pagamento; uma aprovação posterior ao cancelamento local retorna `checkout.needs_review: true` para reconciliação/reembolso administrativo, sem reabrir a compra nem baixar estoque novamente. Essa pendência de integração com compras impede considerar o conjunto pronto para produção.
-- Não há split, repasse automático nem comissão nesta implementação; a conta da credencial recebe o valor. Essa definição depende de confirmação do projeto. Reembolsos parciais, chargebacks e salvamento de cartões não têm fluxo de gestão implementado; os detalhes externos não equivalem a reembolso integral.
+- A comissão planejada usa `PAYMENT_COMMISSION_PERCENT`, padrão de 5%, sobre o valor dos itens no banco. O plano é persistido atomicamente em `payment_distribution` quando o pagamento é criado e retornado em `checkout.distribution`. Percentual e valores históricos não mudam ao repetir a requisição. O cálculo usa centavos e conserva a soma entre fornecedores, inclusive no arredondamento.
+- Esse plano não transfere dinheiro, não desconta comissão no Mercado Pago e não registra comissão como recebida. `transfers_executed` é false e `settlement_status` é `not_configured` (ou `not_applicable` para pagamento recusado/reembolsado). Valores dos fornecedores são anteriores às taxas do provedor. O repasse real depende da vinculação dos vendedores e de uma modalidade de split compatível/habilitada; a Orders API atual não recebe `application_fee` como se fosse a Payments API.
+- Reembolsos parciais, chargebacks e salvamento de cartões não têm fluxo de gestão implementado; os detalhes externos não equivalem a reembolso integral.
 
 ## cURLs para importar no Postman
 

@@ -18,6 +18,7 @@ process.env.PAYMENT_PROVIDER = "mercado_pago";
 process.env.MERCADO_PAGO_ENV = "test";
 process.env.MERCADO_PAGO_ACCESS_TOKEN = "TOKEN_FICTICIO_SEM_ACESSO_EXTERNO";
 process.env.MERCADO_PAGO_WEBHOOK_SECRET = crypto.randomBytes(32).toString("hex");
+process.env.PAYMENT_COMMISSION_PERCENT = "5";
 
 const pool = require("../src/db/connect");
 const db = pool.promise();
@@ -155,6 +156,7 @@ async function cleanup() {
     try {
         // Única DDL: tabela nova; nunca lê/executa o script destrutivo do schema.
         await db.query(fs.readFileSync(path.join(__dirname, "../src/mysql-init/migration_payment_gateway.sql"), "utf8"));
+        await db.query(fs.readFileSync(path.join(__dirname, "../src/mysql-init/migration_payment_distribution.sql"), "utf8"));
         const hash = await bcrypt.hash(password, 10);
         for (const [key, role] of [["buyer", "user"], ["seller", "company"], ["admin", "admin"]]) {
             await db.query("INSERT INTO `user` (id, role, name, email, password, cellphone, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
@@ -393,6 +395,38 @@ async function cleanup() {
             assert.equal(refund.status, 200);
             assert.equal(refund.body.payment.status, "refunded");
             assert.equal(await stock(), before + 2);
+        });
+        await check("comissão de 5% vem do banco e é preservada na repetição", async () => {
+            const id = await shopping();
+            const created = await create(id, "pix", { commission: 0, commission_percent: 0 });
+            assert.equal(created.status, 201);
+            const plan = created.body.checkout.distribution;
+            assert.equal(plan.percentage, "5.00");
+            assert.equal(plan.gross_amount, "50.00");
+            assert.equal(plan.marketplace_amount, "2.50");
+            assert.equal(plan.sellers_amount_before_provider_fees, "47.50");
+            assert.equal(plan.sellers[0].seller_id, ids.seller);
+            assert.equal(plan.transfers_executed, false);
+            assert.equal(plan.settlement_status, "not_configured");
+            process.env.PAYMENT_COMMISSION_PERCENT = "10";
+            try {
+                const repeated = await create(id);
+                assert.equal(repeated.status, 200);
+                assert.deepEqual(repeated.body.checkout.distribution, plan);
+            } finally {
+                process.env.PAYMENT_COMMISSION_PERCENT = "5";
+            }
+        });
+        await check("arredondamento por fornecedor conserva todos os centavos", async () => {
+            const distribution = require("../src/services/paymentDistributionService");
+            const sellerIds = [uuid.generateId(), uuid.generateId(), uuid.generateId()];
+            const plan = distribution.calculate(sellerIds.map(seller_id => ({ seller_id, value: "0.10" })), "0.30", 500);
+            assert.equal(plan.marketplace_amount, "0.02");
+            assert.equal(plan.sellers_amount_before_provider_fees, "0.28");
+            const cents = value => Math.round(Number(value) * 100);
+            assert.equal(plan.sellers.reduce((sum, item) => sum + cents(item.commission_amount), 0), 2);
+            assert.equal(plan.sellers.reduce((sum, item) => sum + cents(item.amount_before_provider_fees), 0), 28);
+            assert.throws(() => distribution.calculate([{ seller_id: sellerIds[0], value: "0.31" }], "0.30"), { status: 409 });
         });
         console.log(`PASSOU: ${passed} cenários; HTTP + MySQL reais, Mercado Pago interceptado, zero cobranças externas.`);
     } catch (error) {

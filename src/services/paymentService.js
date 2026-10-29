@@ -1,5 +1,6 @@
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
+const paymentDistribution = require("./paymentDistributionService");
 
 function createError(message, status) {
     const error = new Error(message);
@@ -114,6 +115,15 @@ const paymentService = {
             }
             const id = uuid.generateId();
 
+            const [items] = await conn.query(
+                `SELECT sp.value, BIN_TO_UUID(p.id_user) AS seller_id
+                 FROM shopping_product sp
+                 INNER JOIN product p ON p.id = sp.id_product
+                 WHERE sp.id_shopping = ?`,
+                [uuid.toBin(data.id_shopping)]
+            );
+            const distribution = paymentDistribution.calculate(items, shopping.value);
+
             await conn.query(
                 `INSERT INTO payment (
                     id,
@@ -135,6 +145,10 @@ const paymentService = {
             await conn.query(
                 `INSERT INTO payment_gateway (id_payment, provider, environment, request_hash) VALUES (?, ?, ?, ?)`,
                 [uuid.toBin(id), data.gateway.provider, data.gateway.environment, data.gateway.request_hash]
+            );
+            await conn.query(
+                "INSERT INTO payment_distribution (id_payment, plan) VALUES (?, ?)",
+                [uuid.toBin(id), JSON.stringify(distribution)]
             );
             await conn.commit();
 
