@@ -11,6 +11,7 @@ const shoppingService = {
 
             let totalValue = 0;
             const processedItems = [];
+            const sellers = new Map();
 
             for (const item of items) {
                 const productBinId = uuid.toBin(item.id_product);
@@ -69,6 +70,15 @@ const shoppingService = {
                     subtotal: itemTotal,
                     current_stock: product.quantity
                 });
+
+                const sellerId = String(product.id_user).toLowerCase();
+                if (!sellers.has(sellerId)) {
+                    sellers.set(sellerId, []);
+                }
+                sellers.get(sellerId).push({
+                    name: product.name,
+                    quantity: item.quantity
+                });
             }
 
             totalValue = Number(totalValue.toFixed(2));
@@ -111,10 +121,13 @@ const shoppingService = {
             await conn.commit();
 
             return {
-                id: shoppingId,
-                value: totalValue,
-                status: "pending",
-                items: processedItems.map(({ current_stock, ...rest }) => rest)
+                shopping: {
+                    id: shoppingId,
+                    value: totalValue,
+                    status: "pending",
+                    items: processedItems.map(({ current_stock, ...rest }) => rest)
+                },
+                sellers: [...sellers].map(([id, items]) => ({ id, items }))
             };
 
         } catch (error) {
@@ -158,8 +171,8 @@ const shoppingService = {
     },
 
 
-    async getShoppingById(id) {
-        const [shoppingRows] = await connect.promise().query(
+    async getShoppingById(id, connection = connect.promise()) {
+        const [shoppingRows] = await connection.query(
             `SELECT
                 BIN_TO_UUID(s.id) AS id,
                 s.datetime,
@@ -181,7 +194,7 @@ const shoppingService = {
 
         const shopping = shoppingRows[0];
 
-        const [itemRows] = await connect.promise().query(
+        const [itemRows] = await connection.query(
             `SELECT
                 BIN_TO_UUID(sp.id) AS id,
                 sp.value AS subtotal,
@@ -203,7 +216,7 @@ const shoppingService = {
     },
 
 
-    async updateStatus(id, newStatus) {
+    async updateStatus(id, newStatus, { onlyPending = false } = {}) {
         let conn;
         try {
             conn = await connect.promise().getConnection();
@@ -224,6 +237,12 @@ const shoppingService = {
             }
 
             const currentStatus = shoppingRows[0].status;
+
+            if (onlyPending && currentStatus !== "pending") {
+                const err = new Error(`Apenas compras com status "pending" podem ser canceladas. Status atual: "${currentStatus}".`);
+                err.status = 400;
+                throw err;
+            }
 
             if (["cancelled", "refused", "completed"].includes(currentStatus)) {
                 const err = new Error(`Esta compra já foi finalizada com status "${currentStatus}" e não pode ser alterada.`);
@@ -251,16 +270,21 @@ const shoppingService = {
                 }
             }
 
-            await conn.query(
-                `UPDATE shopping
-                 SET status = ?
-                 WHERE id = ?`,
-                [newStatus, uuid.toBin(id)]
-            );
+            const changed = currentStatus !== newStatus;
+            if (changed) {
+                await conn.query(
+                    `UPDATE shopping
+                     SET status = ?
+                     WHERE id = ?`,
+                    [newStatus, uuid.toBin(id)]
+                );
+            }
 
+            // A resposta pertence a esta transição, não a uma alteração posterior.
+            const shopping = await shoppingService.getShoppingById(id, conn);
             await conn.commit();
 
-            return await shoppingService.getShoppingById(id);
+            return { shopping, previousStatus: currentStatus, changed };
 
         } catch (error) {
             if (conn) {

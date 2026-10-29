@@ -17,6 +17,7 @@
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
 - Há teste específico de pagamentos em `scripts/test-payment-integration.js`, com MySQL real e transporte externo interceptado; exige `RUN_PAYMENT_DB_TESTS=1`, nunca produção. Não há suíte geral, lint, typecheck ou build. Use `node --check` para sintaxe; configuração e cURLs em `docs/payments.md`.
+- Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 
 ## Fluxo de trabalho do agente
 
@@ -31,8 +32,12 @@
 
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
-- Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
-- Compras estão implementadas em `/shopping/*`; a autorização genérica em `PATCH /shopping/:id/status` ainda precisa de revisão. Bryan negou alterações nesse módulo em 29/10/2026; mantenha seus arquivos como estavam. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` e `join_conversation` exigem identidade autenticada e participação na conversa. A validação do JWT para ingresso ocorre na conexão; não há desconexão automática quando o token expira depois dela.
+- Notificações automáticas atuais: mensagem nova, cadastro de conta, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador) e cancelamento (`sistema` para cada vendedor). Pagamento, review e disputa ainda dependem dos respectivos fluxos.
+- Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- `shoppingService.updateStatus` retorna `{ shopping, previousStatus, changed }`, decididos sob lock transacional. Controllers notificam apenas quando `changed`; `/cancel` exige `onlyPending` dentro da transação. Esses metadados não fazem parte da resposta HTTP.
+- `npm run test:notification` cobre MySQL/HTTP e transporte Socket.IO real (WebSocket nativo; Node.js 22+). O teste não exercita SMTP/OAuth reais, carga nem clientes web/mobile.
+- Bryan não autorizou correções próprias no módulo de compras durante o trabalho de pagamentos. As alterações de compras recebidas da `main` foram incorporadas no merge solicitado em 29/10/2026; preserve-as e peça autorização antes de novas mudanças fora de pagamentos.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
@@ -41,6 +46,7 @@
 ## Banco, autenticação e dados
 
 - Schema: `src/mysql-init/RFScript.sql`; migração aditiva social: `src/mysql-init/migration_social_login.sql`. Não há framework de migração.
+- Na integração da `main` em 29/10/2026, o banco local ainda não tinha `localization.latitude`/`longitude` e exigia `user.password`/`cellphone`, enquanto o schema versionado permite NULL nesses dois campos. O merge não altera esse banco. Reconfirme o schema antes da integração mobile; as suítes recebidas da main foram validadas em banco temporário com o schema versionado.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
 - JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.

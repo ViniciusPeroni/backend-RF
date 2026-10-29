@@ -2,7 +2,7 @@
 
 ## Estado das ferramentas
 
-O `package.json` define somente `npm start` (`node --watch src/server.js`) e `npm run start:dev` (requer `nodemon` global, não declarado no projeto). Não há lint, build, typecheck ou comando `npm test`. Há um teste específico de pagamentos em `scripts/test-payment-integration.js`.
+O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto), `npm run test:notification`, `npm run test:card` e `npm run test:localization`. Os três scripts são integrações com MySQL, não uma suíte completa de testes. Há também um teste específico de pagamentos em `scripts/test-payment-integration.js`. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro. Não invente outros comandos de teste como `npm test`.
 
 No PowerShell, somente em banco de desenvolvimento:
 
@@ -11,7 +11,7 @@ $env:RUN_PAYMENT_DB_TESTS='1'
 node scripts/test-payment-integration.js
 ```
 
-O teste aplica somente a migração aditiva, cria fixtures exclusivas e remove-as ao final. Usa HTTP/MySQL reais e intercepta chamadas externas ao Mercado Pago; não valida o ambiente do provedor nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
+O teste de pagamentos aplica somente migrações aditivas, cria fixtures exclusivas e remove-as ao final. Usa HTTP/MySQL reais e intercepta chamadas externas ao Mercado Pago; não valida o ambiente do provedor nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
 
 O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 
@@ -33,11 +33,16 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
 - confirme persistência e isolamento por usuário com dados sintéticos;
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
+- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento e Node.js 22+ com WebSocket nativo. Cobre validação, ownership, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
+- para cartões, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:card`. Também cria e remove usuários sintéticos e cobre validação, ownership e não exposição de `payment_token`.
+- para localização, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:localization`. Cria e remove dados sintéticos e cobre CRUD do dono, coordenadas e mascaramento do endereço do anúncio.
 
 ### Socket.IO e provedores externos
 
-- A página `src/sockets/test/socket-test.html` pode ajudar no teste manual de conexão, mas o evento atualmente documentado não autentica nem valida participação.
+- A página `src/sockets/test/socket-test.html` testa somente conexão e `join_conversation`; ela não testa o handshake autenticado, `send_message` ou notificações.
 - Separe comportamento simulado de entrega SMTP/OAuth real; não reporte integração externa sem evidência do provedor.
+- A suíte de notificações mantém casos com IO simulado e também sobe Socket.IO real no servidor HTTP local: verifica os quatro eventos de notificação em duas sessões do dono, isolamento de outro usuário/anônimo/JWT inválido ou já expirado, reconexão e recuperação HTTP de avisos persistidos offline. `tests/helpers/notificationSocketClient.js` implementa somente o transporte WebSocket Engine.IO v4/namespace padrão para teste, sem polling/retry e sem nova dependência.
+- Cadastro tem envio de OTP substituído no teste; não exercita SMTP/OAuth reais. O teste de falha de notificação injeta uma rejeição do serviço para comprovar que a compra continua confirmada.
 - Não conecte teste a dados pessoais ou produção.
 
 ## Níveis de evidência
@@ -51,4 +56,4 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 
 ## Relato de qualidade
 
-Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. Há teste específico de pagamentos, mas não suíte geral do backend. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade.
+Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. Não há suíte automatizada completa; os testes de pagamento, notificação, cartão e localização são coberturas parciais e versionadas. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade e [`notification-integration.md`](notification-integration.md) para o contrato dos gatilhos.

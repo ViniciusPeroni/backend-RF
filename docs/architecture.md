@@ -47,9 +47,13 @@ src/
 - O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.
 - A tabela `conversation_participant` e tabelas de domínio não demonstram fluxos REST/socket implementados.
 
-## Estado de chat e agendamentos
+## Chat e notificações
 
-O socket atual só trata `join_conversation`; não autentica conexão, valida participante, envia ou persiste mensagens. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
+`notificationSocket.js` verifica JWT para adicionar o usuário à sala `user:<uuid>`. `send_message` exige identidade autenticada, confere participação em `conversation_participant`, persiste a mensagem e atualiza a conversa e o último item lido do remetente. Cada outro participante recebe `new_message` e uma notificação `nova_mensagem` persistida.
+
+`join_conversation` exige autenticação, UUID válido e participação em `conversation_participant`. Cadastro e ativação por OTP também geram notificações `sistema`; a criação de compra gera `reserva_solicitada` para cada vendedor, o aceite/recusa gera `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento gera `sistema` para cada vendedor. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
+
+`shoppingService.updateStatus(id, newStatus, { onlyPending = false } = {})` lê o status sob `SELECT ... FOR UPDATE`, aplica as restrições e retorna `{ shopping, previousStatus, changed }`. A compra retornada é lida na mesma conexão/transação antes do commit. Os controllers preservam a resposta HTTP e só notificam se `changed`; `/cancel` também valida `pending` sob o lock. Falhas de notificação não desfazem a transição já confirmada. Não há outbox/fila/retry persistente: uma queda entre commit e aviso pode deixar de produzir a notificação.
 
 ## Riscos de compatibilidade
 

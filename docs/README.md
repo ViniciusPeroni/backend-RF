@@ -18,6 +18,7 @@ Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve
 | Trabalhar com autenticação, documentos ou dados pessoais | [security-privacy.md](security-privacy.md) |
 | Alterar textos, UUIDs, datas ou formatos | [localization.md](localization.md) |
 | Planejar ou verificar uma funcionalidade | [feature-readiness.md](feature-readiness.md), [quality.md](quality.md) |
+| Integrar notificações em outro fluxo | [notification-integration.md](notification-integration.md) |
 | Executar uma tarefa como agente | [agent-workflow.md](agent-workflow.md) |
 | Entender o escopo real do produto | [product.md](product.md) |
 | Registrar decisão técnica duradoura | [decisions.md](decisions.md), [adr/README.md](adr/README.md) |
@@ -29,7 +30,8 @@ Pagamentos: configuração do Mercado Pago, migração aditiva, contrato e cURLs
 - Stack: Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
 - Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.
 - Aplicações web e móvel são projetos independentes. Esta documentação cobre somente `backend-RF/`.
-- Não há scripts permanentes de teste, lint, build ou typecheck no `package.json`.
+- Não há suíte completa de testes, lint, typecheck ou build no `package.json`.
+- Existem scripts de integração: `npm run test:notification`, `npm run test:card` e `npm run test:localization` (requerem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento). O teste de pagamentos usa `RUN_PAYMENT_DB_TESTS=1` e `node scripts/test-payment-integration.js`. Eles não cobrem todo o backend.
 - `src/mysql-init/RFScript.sql` contém `DROP DATABASE`; nunca o execute em banco com dados importantes.
 - CPF/CNPJ não podem ser persistidos em texto puro. Não inclua segredos ou dados pessoais em documentação, logs ou exemplos.
 

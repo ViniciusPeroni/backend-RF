@@ -16,8 +16,12 @@ Não crie contrato porque existe tabela no schema ou porque um cliente parece es
 ## Chat e notificações
 
 - Origem CORS fixa em `http://localhost:3000` no servidor observado.
-- Socket.IO implementa apenas `join_conversation`, que coloca socket na sala pelo ID recebido, sem auth ou validação de participante.
-- Não há evento de envio de mensagem nem evento/gatilho de notificação documentado.
-- Tabela `notification` não é uma API.
+- Envie JWT no handshake Socket.IO usando `auth: { token }` para receber eventos na sala individual `user:<uuid>`.
+- `send_message` aceita `{ conversationId, type?, content?, id_answer? }`; a confirmação chega pelo callback e mensagens chegam como `new_message`.
+- Notificações persistidas são emitidas como `notification`; leitura/exclusão sincronizam com `notification_read`, `notifications_read_all` e `notification_deleted`.
+- Depois de reconectar, consulte `GET /notification/` (opcionalmente `?read=nao`): não há replay automático de eventos perdidos enquanto offline.
+- Gatilhos automáticos atuais: mensagem nova, cadastro, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador) e cancelamento (`sistema` para cada vendedor). Pagamento, review e disputa continuam pendentes até seus fluxos chamarem `notificationService.notifyUser(...)`; o contrato está em [`notification-integration.md`](notification-integration.md).
+- Teste de integração: `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification` (MySQL de desenvolvimento; remove dados sintéticos ao final).
+- `join_conversation` exige identidade autenticada, UUID válido e participação na conversa.
 
-Não conecte dados privados a esse socket sem resolver autenticação e autorização no servidor.
+O JWT é validado no ingresso; expiração posterior não encerra a sessão automaticamente. A suíte exercita o transporte local, não substitui validação com web/mobile nem implantação com CORS adequado.
