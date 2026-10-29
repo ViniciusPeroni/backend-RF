@@ -2,7 +2,10 @@
 
 ## Regras obrigatórias
 
+- Autorização pontual de Bryan em 29/10/2026: concluir o módulo de pagamentos e preparar Mercado Pago diretamente no código, exclusivamente em `feature/bryan/PaymentController` neste repositório. Vale somente para esta etapa; não autoriza edições futuras ou em outros projetos/branches. Altere somente lógica de pagamentos; peça autorização antes de alterar outra parte da API.
+
 - Responda sempre em português brasileiro, inclusive perguntas e relatórios.
+- Não crie, altere ou exclua arquivos de código sem autorização explícita de Bryan para a alteração solicitada. Por padrão, apenas oriente, leia e revise o código. A única exceção é o arquivo `AGENTS.md`, que pode ser atualizado. Pedidos de orientação ou de execução de testes não autorizam alterações no código; testes e operações no banco devem respeitar o escopo autorizado.
 - Não faça commit nem push sem autorização explícita. Não edite os projetos irmãos `FrontEnd-RF/` e `Mobile-RF/` em tarefas restritas ao backend.
 - Siga o padrão existente e mantenha alterações no escopo pedido. Não implemente requisitos futuros só porque aparecem no TCC, schema ou documentação.
 - Nunca exponha ou registre segredos, tokens ou dados pessoais reais. Nunca armazene CPF/CNPJ em texto puro.
@@ -13,7 +16,7 @@
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
-- Não há suíte permanente de testes, lint, typecheck ou build. Não invente comandos; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- Há teste específico de pagamentos em `scripts/test-payment-integration.js`, com MySQL real e transporte externo interceptado; exige `RUN_PAYMENT_DB_TESTS=1`, nunca produção. Não há suíte geral, lint, typecheck ou build. Use `node --check` para sintaxe; configuração e cURLs em `docs/payments.md`.
 
 ## Fluxo de trabalho do agente
 
@@ -29,7 +32,7 @@
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
 - Socket.IO atualmente registra `join_conversation`; não há autenticação nem autorização da sala.
-- Compras estão implementadas em `/shopping/*`; revisar a autorização em `PATCH /shopping/:id/status` antes de ampliar o fluxo. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- Compras estão implementadas em `/shopping/*`; a autorização genérica em `PATCH /shopping/:id/status` ainda precisa de revisão. Bryan negou alterações nesse módulo em 29/10/2026; mantenha seus arquivos como estavam. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
