@@ -15,6 +15,8 @@ const http = require('http');
 const assert = require('assert');
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { Server } = require('socket.io');
+const { connectNotificationSocket } = require('./helpers/notificationSocketClient');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -28,6 +30,7 @@ const uuid = require('../src/utils/uuid');
 const notificationRoutes = require('../src/routes/modules/notificationRoutes');
 const otpRoutes = require('../src/routes/modules/otpRoutes');
 const shoppingRoutes = require('../src/routes/modules/shoppingRoutes');
+const shoppingService = require('../src/services/shoppingService');
 const notificationService = require('../src/services/notificationService');
 const {
     notificationSocket,
@@ -35,6 +38,7 @@ const {
     emitToUser
 } = require('../src/sockets/notificationSocket');
 const chatSocket = require('../src/sockets/chatSocket');
+const startSockets = require('../src/sockets');
 
 const results = [];
 let failed = 0;
@@ -114,6 +118,8 @@ async function main() {
     let signupUserId = null;
     const otpUserId = uuid.generateId();
     let httpServer;
+    let realIo;
+    const realClients = [];
     let userRoutes = null;
     let signupSkipReason = null;
 
@@ -361,6 +367,70 @@ async function main() {
             reference_table: 'X'.repeat(31)
         });
         check('POST /notification com reference_table > 30 retorna 400', () => assertStatus(r, 400, 'reference_table longa'));
+
+        const invalidNotifications = [
+            ['title numérico', { title: 123 }],
+            ['title objeto', { title: { text: 'Título' } }],
+            ['title array', { title: ['Título'] }],
+            ['title em branco', { title: '   ' }],
+            ['content objeto', { content: { text: 'Conteúdo' } }],
+            ['content array', { content: ['Conteúdo'] }],
+            ['content booleano', { content: false }],
+            ['content numérico', { content: 123 }],
+            ['content excede TEXT em UTF-8', { content: 'á'.repeat(32768) }],
+            ['reference_table objeto', { reference_table: { table: 'user' } }],
+            ['reference_table array', { reference_table: ['user'] }],
+            ['reference_table numérico', { reference_table: 123 }],
+            ['reference_table em branco', { reference_table: '  ' }],
+            ['reference_id vazio', { reference_id: '' }],
+            ['reference_id numérico', { reference_id: 0 }]
+        ];
+        for (const [label, fields] of invalidNotifications) {
+            const before = await listNotifications(buyerId);
+            const response = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
+                type: 'sistema', title: 'Payload inválido', ...fields
+            });
+            const after = await listNotifications(buyerId);
+            check(`POST /notification rejeita ${label}`, () => {
+                assertStatus(response, 400, label);
+                assert.strictEqual(after.length, before.length, 'payload inválido não deve inserir notificação');
+            });
+            // Evita que uma regressão na validação contamine os próximos cenários.
+            if (response.status === 201) {
+                await req('DELETE', `/api/reaproveitafranca/notification/${response.body.id}`, tokenA);
+            }
+        }
+
+        for (const query of ['read[valor]=sim', 'type[valor]=sistema', 'read=sim&read=nao', 'type=sistema&type=nova_review']) {
+            const response = await req('GET', `/api/reaproveitafranca/notification/?${query}`, tokenA);
+            check(`filtro composto rejeitado: ${query}`, () => assertStatus(response, 400, 'filtro composto'));
+        }
+
+        const nullable = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
+            type: 'sistema', title: 'Campos opcionais', content: null, reference_table: null, reference_id: null
+        });
+        check('campos opcionais nulos continuam válidos', () => assertStatus(nullable, 201, 'opcionais nulos'));
+        if (nullable.status === 201) {
+            await req('DELETE', `/api/reaproveitafranca/notification/${nullable.body.id}`, tokenA);
+        }
+
+        for (const body of [[], undefined]) {
+            const response = await req('POST', '/api/reaproveitafranca/notification/', tokenA, body);
+            check(`POST /notification rejeita corpo ${body ? 'array' : 'ausente'}`, () => assertStatus(response, 400, 'corpo inválido'));
+        }
+
+        const boundary = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
+            type: 'sistema', title: 'X'.repeat(100), reference_table: 'x'.repeat(30), content: 'x'.repeat(65535)
+        });
+        await checkAsync('limites válidos de title, reference_table e TEXT são aceitos sem truncar', async () => {
+            assertStatus(boundary, 201, 'limites válidos');
+            const saved = await req('GET', `/api/reaproveitafranca/notification/${boundary.body.id}`, tokenA);
+            assertStatus(saved, 200, 'leitura dos limites');
+            assert.strictEqual(saved.body.title.length, 100);
+            assert.strictEqual(saved.body.reference_table.length, 30);
+            assert.strictEqual(Buffer.byteLength(saved.body.content, 'utf8'), 65535);
+        });
+        if (boundary.status === 201) await req('DELETE', `/api/reaproveitafranca/notification/${boundary.body.id}`, tokenA);
 
         r = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
             type: 'sistema',
@@ -941,6 +1011,183 @@ async function main() {
             assert.ok(notifications[0].content.includes('administrador'), notifications[0].content);
         });
 
+        // Força duas leituras de pending antes das atualizações, sem simular o banco.
+        const runConcurrentStatus = async (status, route = 'status') => {
+            const created = await req('POST', '/api/reaproveitafranca/shopping/create', tokenA, {
+                items: [{ id_product: productB2Id, quantity: 1 }]
+            });
+            assertStatus(created, 201, 'fixture concorrente');
+            const id = created.body.shopping.id;
+            shoppingIds.push(id);
+            const [before] = await connect.promise().query('SELECT quantity FROM product WHERE id = ?', [uuid.toBin(productB2Id)]);
+            const originalGet = shoppingService.getShoppingById;
+            let reads = 0;
+            let barrierTimedOut = false;
+            let release;
+            const bothRead = new Promise((resolve) => { release = resolve; });
+            const timeout = setTimeout(() => { barrierTimedOut = true; release(); }, 5000);
+            shoppingService.getShoppingById = async (...args) => {
+                const shopping = await originalGet(...args);
+                if (args[0] === id && !args[1] && ++reads <= 2) {
+                    if (reads === 2) release();
+                    await bothRead;
+                }
+                return shopping;
+            };
+            try {
+                const responses = await Promise.all([1, 2].map(() => req(
+                    'PATCH', `/api/reaproveitafranca/shopping/${id}/${route}`,
+                    route === 'cancel' ? tokenA : tokenB,
+                    route === 'cancel' ? undefined : { status }
+                )));
+                assert.ok(reads >= 2, 'ambas as leituras devem ter ocorrido');
+                assert.ok(!barrierTimedOut, 'a barreira concorrente não pode depender do timeout');
+                const notifications = (await listNotifications(route === 'cancel' ? sellerBId : buyerId,
+                    route === 'cancel' ? 'sistema' : status === 'accepted' ? 'reserva_aceita' : 'reserva_recusada'))
+                    .filter((n) => n.reference_id === id);
+                assert.strictEqual(notifications.length, 1, 'uma transição deve gerar apenas um aviso');
+                assert.deepStrictEqual(responses.map((response) => response.status).sort(), status === 'accepted' ? [200, 200] : [200, 400]);
+                const [after] = await connect.promise().query('SELECT quantity FROM product WHERE id = ?', [uuid.toBin(productB2Id)]);
+                assert.strictEqual(after[0].quantity, before[0].quantity + (status === 'accepted' ? 0 : 1), 'estoque deve ser restaurado uma única vez');
+            } finally {
+                clearTimeout(timeout);
+                shoppingService.getShoppingById = originalGet;
+            }
+        };
+
+        await checkAsync('aceites simultâneos geram apenas uma reserva_aceita', () => runConcurrentStatus('accepted'));
+        await checkAsync('recusas simultâneas notificam e restauram estoque uma vez', () => runConcurrentStatus('refused'));
+        await checkAsync('cancelamentos simultâneos notificam e restauram estoque uma vez', () => runConcurrentStatus('cancelled', 'cancel'));
+
+        await checkAsync('cancelamento revalida pending depois de uma alteração concorrente', async () => {
+            const created = await req('POST', '/api/reaproveitafranca/shopping/create', tokenA, {
+                items: [{ id_product: productB2Id, quantity: 1 }]
+            });
+            assertStatus(created, 201, 'fixture de cancelamento');
+            const id = created.body.shopping.id;
+            shoppingIds.push(id);
+            const originalGet = shoppingService.getShoppingById;
+            let intervened = false;
+            shoppingService.getShoppingById = async (...args) => {
+                const shopping = await originalGet(...args);
+                if (args[0] === id && !intervened) {
+                    intervened = true;
+                    await shoppingService.updateStatus(id, 'accepted');
+                }
+                return shopping;
+            };
+            try {
+                const response = await req('PATCH', `/api/reaproveitafranca/shopping/${id}/cancel`, tokenA);
+                assertStatus(response, 400, 'cancelamento após aceite');
+                const shopping = await originalGet(id);
+                assert.strictEqual(shopping.status, 'accepted');
+                const notifications = (await listNotifications(sellerBId, 'sistema')).filter((n) => n.reference_id === id);
+                assert.strictEqual(notifications.length, 0);
+            } finally {
+                shoppingService.getShoppingById = originalGet;
+            }
+        });
+
+        await checkAsync('falha ao notificar aceite não desfaz a transição da compra', async () => {
+            const originalNotify = notificationService.notifyUser;
+            notificationService.notifyUser = async () => { throw new Error('Falha sintética de notificação'); };
+            try {
+                const response = await req('PATCH', `/api/reaproveitafranca/shopping/${shopping2.id}/status`, adminToken, { status: 'pending' });
+                assertStatus(response, 200, 'retorno para pending');
+                const accepted = await req('PATCH', `/api/reaproveitafranca/shopping/${shopping2.id}/status`, tokenB, { status: 'accepted' });
+                assertStatus(accepted, 200, 'aceite mesmo sem notificação');
+                assert.strictEqual((await shoppingService.getShoppingById(shopping2.id)).status, 'accepted');
+            } finally {
+                notificationService.notifyUser = originalNotify;
+            }
+        });
+
+        // Transporte real: as rotas e os módulos de socket são os de produção.
+        realIo = new Server(httpServer);
+        startSockets(realIo);
+        const socketUrl = `http://127.0.0.1:${httpServer.address().port}`;
+        const openClient = async (auth) => {
+            const client = connectNotificationSocket(socketUrl, auth);
+            realClients.push(client);
+            await client.ready;
+            return client;
+        };
+        const owner = await openClient({ token: tokenA });
+        const ownerSecondSession = await openClient({ token: tokenA });
+        const otherUser = await openClient({ token: tokenB });
+        const anonymous = await openClient({});
+        const invalidToken = await openClient({ token: 'token-invalido' });
+        const expiredToken = await openClient({ token: jwt.sign({ id: buyerId }, process.env.SECRET, { expiresIn: -1 }) });
+        const owners = [owner, ownerSecondSession];
+        const outsiders = [otherUser, anonymous, invalidToken, expiredToken];
+
+        let liveId;
+        await checkAsync('Socket.IO real entrega notification nas duas sessões do dono', async () => {
+            const response = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
+                type: 'sistema', title: 'Transporte real', content: 'Aviso sintético'
+            });
+            assertStatus(response, 201, 'criação com socket real');
+            liveId = response.body.id;
+            for (const client of owners) {
+                const notification = await client.waitForEvent('notification', (payload) => payload.id === liveId);
+                assert.strictEqual(notification.id_user, buyerId);
+                assert.strictEqual(notification.content, 'Aviso sintético');
+            }
+        });
+
+        await checkAsync('Socket.IO real sincroniza notification_read nas duas sessões', async () => {
+            const response = await req('PATCH', `/api/reaproveitafranca/notification/${liveId}/read`, tokenA);
+            assertStatus(response, 200, 'leitura com socket real');
+            for (const client of owners) await client.waitForEvent('notification_read', (payload) => payload.id === liveId);
+        });
+
+        await checkAsync('Socket.IO real sincroniza notifications_read_all nas duas sessões', async () => {
+            const response = await req('PATCH', '/api/reaproveitafranca/notification/read-all', tokenA);
+            assertStatus(response, 200, 'leitura em lote com socket real');
+            for (const client of owners) {
+                const payload = await client.waitForEvent('notifications_read_all');
+                assert.strictEqual(payload.updated, response.body.updated);
+            }
+        });
+
+        await checkAsync('Socket.IO real sincroniza notification_deleted nas duas sessões', async () => {
+            const response = await req('DELETE', `/api/reaproveitafranca/notification/${liveId}`, tokenA);
+            assertStatus(response, 200, 'exclusão com socket real');
+            for (const client of owners) await client.waitForEvent('notification_deleted', (payload) => payload.id === liveId);
+        });
+
+        // Barreira ordenada no mesmo transporte: não depende de um sleep para
+        // concluir que um socket não recebeu os eventos anteriores.
+        realIo.emit('notification_test_barrier', { phase: 'isolation' });
+        for (const client of [...owners, ...outsiders]) await client.waitForEvent('notification_test_barrier');
+        check('Socket.IO real não duplica eventos em sessões do dono', () => {
+            for (const client of owners) {
+                for (const event of ['notification', 'notification_read', 'notifications_read_all', 'notification_deleted']) {
+                    assert.strictEqual(client.events.filter((item) => item.event === event).length, 1, event);
+                }
+            }
+        });
+        for (const [index, label] of ['outro usuário', 'anônimo', 'JWT inválido', 'JWT expirado'].entries()) {
+            check(`Socket.IO real isola notificações de ${label}`, () => {
+                assert.strictEqual(outsiders[index].events.filter((item) => [
+                    'notification', 'notification_read', 'notifications_read_all', 'notification_deleted'
+                ].includes(item.event)).length, 0);
+            });
+        }
+
+        await Promise.all(owners.map((client) => client.close()));
+        const offline = await req('POST', '/api/reaproveitafranca/notification/', tokenA, { type: 'sistema', title: 'Aviso offline' });
+        await checkAsync('reconexão recupera pelo HTTP notificação persistida enquanto offline', async () => {
+            assertStatus(offline, 201, 'persistência offline');
+            const reconnected = await openClient({ token: tokenA });
+            const response = await req('GET', '/api/reaproveitafranca/notification/?read=nao', tokenA);
+            assertStatus(response, 200, 'recuperação offline');
+            assert.ok(response.body.some((item) => item.id === offline.body.id));
+            const online = await req('POST', '/api/reaproveitafranca/notification/', tokenA, { type: 'sistema', title: 'Aviso após reconectar' });
+            assertStatus(online, 201, 'criação após reconectar');
+            await reconnected.waitForEvent('notification', (payload) => payload.id === online.body.id);
+        });
+
     } catch (error) {
         fail('erro inesperado no teste', error);
     } finally {
@@ -952,6 +1199,11 @@ async function main() {
                 cleanupErrors.push(`${label}: ${error.code || error.message}`);
             }
         };
+
+        await tryCleanup('clientes Socket.IO', () => Promise.all(realClients.map((client) => client.close())));
+        if (realIo) {
+            await tryCleanup('servidor Socket.IO', () => new Promise((resolve) => realIo.close(resolve)));
+        }
 
         if (shoppingIds.length > 0) {
             await tryCleanup('shopping', () => connect.promise().query(
