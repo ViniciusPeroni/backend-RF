@@ -5,7 +5,10 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node --watch src/server.js",
-    "start:dev": "nodemon src/server.js"
+    "start:dev": "nodemon src/server.js",
+    "test:notification": "node tests/notification.integration.js",
+    "test:card": "node tests/card.integration.js",
+    "test:localization": "node tests/localization.integration.js"
   },
   "author": "Vinícius Peroni",
   "license": "ISC",

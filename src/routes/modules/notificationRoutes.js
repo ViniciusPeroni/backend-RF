@@ -1,0 +1,15 @@
+const router = require("express").Router();
+const notificationController = require("../../controllers/notificationController");
+const verifyJWT = require("../../middlewares/verifyJWT");
+
+router.use(verifyJWT);
+
+router.post("/", notificationController.createNotification);
+router.get("/", notificationController.listNotifications);
+router.get("/unread/count", notificationController.countUnread);
+router.patch("/read-all", notificationController.markAllAsRead);
+router.get("/:id", notificationController.getNotificationById);
+router.patch("/:id/read", notificationController.markAsRead);
+router.delete("/:id", notificationController.deleteNotification);
+
+module.exports = router;
