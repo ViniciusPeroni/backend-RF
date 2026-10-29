@@ -1,6 +1,8 @@
+
 const productService = require("../services/productService");
 const uuid = require("../utils/uuid");
 
+// CADASTRAR PRODUTO
 const createProduct = async (req, res) => {
     try {
         const {
@@ -17,7 +19,8 @@ const createProduct = async (req, res) => {
             id_localization
         } = req.body;
 
-        if (!name || !category || !type_negotiation || !weight || !conservation_state || !id_localization) {
+        if (!name || !category || !type_negotiation ||
+            !weight || !conservation_state || !id_localization) {
             return res.status(400).json({
                 error: "Todos os campos obrigatórios devem ser preenchidos."
             });
@@ -67,7 +70,7 @@ const createProduct = async (req, res) => {
     }
 };
 
-
+// LISTAR PRODUTOS
 const getProducts = async (req, res) => {
     try {
         const products = await productService.getProducts();
@@ -83,7 +86,7 @@ const getProducts = async (req, res) => {
     }
 };
 
-
+// BUSCAR PRODUTO POR ID
 const getProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -115,7 +118,7 @@ const getProductById = async (req, res) => {
     }
 };
 
-
+// ATUALIZAR PRODUTO
 const updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -140,6 +143,14 @@ const updateProduct = async (req, res) => {
             id_localization
         } = req.body;
 
+        // Verifica se o usuário está autenticado
+        if (!uuid.isValid(req.userId)) {
+            return res.status(401).json({
+                error: "Usuário não autenticado."
+            });
+        }
+
+        // Passa o ID do usuário autenticado para o service
         const product = await productService.updateProduct(
             uuid.toBin(id),
             {
@@ -154,12 +165,13 @@ const updateProduct = async (req, res) => {
                 weight,
                 conservation_state,
                 id_localization
-            }
+            },
+            req.userId
         );
 
         if (!product) {
             return res.status(404).json({
-                error: "Produto não encontrado."
+                error: "Produto não encontrado ou não pertence a você."
             });
         }
 
@@ -177,7 +189,7 @@ const updateProduct = async (req, res) => {
     }
 };
 
-
+// EXCLUIR PRODUTO
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -188,13 +200,22 @@ const deleteProduct = async (req, res) => {
             });
         }
 
+        // Verifica se o usuário está autenticado
+        if (!uuid.isValid(req.userId)) {
+            return res.status(401).json({
+                error: "Usuário não autenticado."
+            });
+        }
+
+        // Passa o ID do proprietário para a exclusão
         const deleted = await productService.deleteProduct(
-            uuid.toBin(id)
+            uuid.toBin(id),
+            req.userId
         );
 
         if (!deleted) {
             return res.status(404).json({
-                error: "Produto não encontrado."
+                error: "Produto não encontrado ou não pertence a você."
             });
         }
 
@@ -210,7 +231,6 @@ const deleteProduct = async (req, res) => {
         });
     }
 };
-
 
 module.exports = {
     createProduct,
