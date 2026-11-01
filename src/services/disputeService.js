@@ -18,6 +18,44 @@ const VALID_STATUS = ["aberta", "em_analise", "resolvida", "rejeitada"];
 // Status considerados finalizados — impedem novas operações
 const FINAL_STATUS = ["resolvida", "rejeitada"];
 
+async function finalizeDispute(id, resolution, resolvedById, newStatus) {
+    const conn = await connect.promise().getConnection();
+    try {
+        await conn.beginTransaction();
+        const [rows] = await conn.query(
+            "SELECT status FROM dispute WHERE id = ? FOR UPDATE",
+            [id]
+        );
+        if (rows.length === 0) {
+            await conn.rollback();
+            return null;
+        }
+        if (FINAL_STATUS.includes(rows[0].status)) {
+            const action = newStatus === "rejeitada" ? "rejeitada" : "resolvida";
+            const err = new Error(`Esta disputa já foi finalizada e não pode ser ${action} novamente.`);
+            err.code = "DISPUTE_ALREADY_FINAL";
+            throw err;
+        }
+        await conn.query(
+            `UPDATE dispute
+             SET status = ?, resolution = ?, id_resolved_by = ?,
+                 resolved_in = NOW(), updated_in = NOW()
+             WHERE id = ?`,
+            [newStatus, resolution, uuid.toBin(resolvedById), id]
+        );
+        const dispute = await disputeService.getDisputeById(id, resolvedById, "admin", conn);
+        await conn.commit();
+        return dispute;
+    } catch (error) {
+        try { await conn.rollback(); } catch (rollbackError) {
+            console.error("Falha no rollback da finalização de disputa:", rollbackError.code || "ROLLBACK_FAILED");
+        }
+        throw error;
+    } finally {
+        conn.release();
+    }
+}
+
 const disputeService = {
 
     // =========================================================
@@ -27,93 +65,80 @@ const disputeService = {
     // produto da compra (id_user de product via shopping_product).
     // =========================================================
     async createDispute(data) {
-        const conn = connect.promise();
+        const conn = await connect.promise().getConnection();
+        try {
+            await conn.beginTransaction();
 
-        // Verifica se a compra existe e se o usuário está vinculado a ela
-        const [shoppingRows] = await conn.query(
-            `SELECT
-                BIN_TO_UUID(s.id_user) AS buyer_id,
-                s.status AS shopping_status
-             FROM shopping s
-             WHERE s.id = ?
-             LIMIT 1`,
-            [uuid.toBin(data.id_shopping)]
-        );
+            // Serializa aberturas na mesma compra antes de verificar duplicata.
+            const [shoppingRows] = await conn.query(
+                `SELECT BIN_TO_UUID(s.id_user) AS buyer_id
+                 FROM shopping s WHERE s.id = ? FOR UPDATE`,
+                [uuid.toBin(data.id_shopping)]
+            );
+            if (shoppingRows.length === 0) {
+                const err = new Error("Compra não encontrada.");
+                err.code = "SHOPPING_NOT_FOUND";
+                throw err;
+            }
 
-        if (shoppingRows.length === 0) {
-            const err = new Error("Compra não encontrada.");
-            err.code = "SHOPPING_NOT_FOUND";
-            throw err;
-        }
+            const isBuyer = shoppingRows[0].buyer_id === data.id_opened_by;
+            let isSeller = false;
+            if (!isBuyer) {
+                const [sellerRows] = await conn.query(
+                    `SELECT p.id FROM shopping_product sp
+                     JOIN product p ON p.id = sp.id_product
+                     WHERE sp.id_shopping = ? AND p.id_user = ? LIMIT 1`,
+                    [uuid.toBin(data.id_shopping), uuid.toBin(data.id_opened_by)]
+                );
+                isSeller = sellerRows.length > 0;
+            }
+            if (!isBuyer && !isSeller) {
+                const err = new Error("Você não possui vínculo com esta compra e não pode abrir uma disputa.");
+                err.code = "DISPUTE_NOT_ALLOWED";
+                throw err;
+            }
 
-        const shopping = shoppingRows[0];
-
-        // Verifica se o usuário é comprador
-        const isBuyer = shopping.buyer_id === data.id_opened_by;
-
-        // Verifica se o usuário é vendedor de algum produto desta compra
-        let isSeller = false;
-        if (!isBuyer) {
-            const [sellerRows] = await conn.query(
-                `SELECT p.id
-                 FROM shopping_product sp
-                 JOIN product p ON p.id = sp.id_product
-                 WHERE sp.id_shopping = ?
-                   AND p.id_user = ?
-                 LIMIT 1`,
+            const [existingRows] = await conn.query(
+                `SELECT id FROM dispute
+                 WHERE id_shopping = ? AND id_opened_by = ?
+                   AND status NOT IN ('resolvida', 'rejeitada') LIMIT 1`,
                 [uuid.toBin(data.id_shopping), uuid.toBin(data.id_opened_by)]
             );
-            isSeller = sellerRows.length > 0;
-        }
+            if (existingRows.length > 0) {
+                const err = new Error("Você já possui uma disputa ativa para esta compra.");
+                err.code = "DISPUTE_ALREADY_EXISTS";
+                throw err;
+            }
 
-        if (!isBuyer && !isSeller) {
-            const err = new Error(
-                "Você não possui vínculo com esta compra e não pode abrir uma disputa."
+            const id = uuid.generateId();
+            await conn.query(
+                `INSERT INTO dispute (id, type, description, status, id_shopping, id_opened_by)
+                 VALUES (?, ?, ?, 'aberta', ?, ?)`,
+                [uuid.toBin(id), data.type, data.description, uuid.toBin(data.id_shopping), uuid.toBin(data.id_opened_by)]
             );
-            err.code = "DISPUTE_NOT_ALLOWED";
-            throw err;
+            await conn.commit();
+            return id;
+        } catch (error) {
+            try { await conn.rollback(); } catch (rollbackError) {
+                console.error("Falha no rollback da abertura de disputa:", rollbackError.code || "ROLLBACK_FAILED");
+            }
+            throw error;
+        } finally {
+            conn.release();
         }
+    },
 
-        // Verifica se já existe uma disputa ativa para esta compra aberta pelo mesmo usuário
-        const [existingRows] = await conn.query(
-            `SELECT id
-             FROM dispute
-             WHERE id_shopping = ?
-               AND id_opened_by = ?
-               AND status NOT IN ('resolvida', 'rejeitada')
-             LIMIT 1`,
-            [uuid.toBin(data.id_shopping), uuid.toBin(data.id_opened_by)]
+    async getNotificationRecipients(shoppingId, { includeAdmins = false } = {}) {
+        const params = [uuid.toBin(shoppingId), uuid.toBin(shoppingId)];
+        const [rows] = await connect.promise().query(
+            `SELECT BIN_TO_UUID(id_user) AS id_user FROM shopping WHERE id = ?
+             UNION
+             SELECT BIN_TO_UUID(p.id_user) AS id_user FROM shopping_product sp
+             JOIN product p ON p.id = sp.id_product WHERE sp.id_shopping = ?
+             ${includeAdmins ? "UNION SELECT BIN_TO_UUID(id) AS id_user FROM `user` WHERE role = 'admin' AND status = 'active'" : ""}`,
+            params
         );
-
-        if (existingRows.length > 0) {
-            const err = new Error(
-                "Você já possui uma disputa ativa para esta compra."
-            );
-            err.code = "DISPUTE_ALREADY_EXISTS";
-            throw err;
-        }
-
-        const id = uuid.generateId();
-
-        await conn.query(
-            `INSERT INTO dispute (
-                id,
-                type,
-                description,
-                status,
-                id_shopping,
-                id_opened_by
-            ) VALUES (?, ?, ?, 'aberta', ?, ?)`,
-            [
-                uuid.toBin(id),
-                data.type,
-                data.description,
-                uuid.toBin(data.id_shopping),
-                uuid.toBin(data.id_opened_by)
-            ]
-        );
-
-        return id;
+        return rows.map((row) => row.id_user);
     },
 
 
@@ -179,8 +204,7 @@ const disputeService = {
     // Retorna null se não existir.
     // Lança erro FORBIDDEN se o usuário não tiver permissão.
     // =========================================================
-    async getDisputeById(id, userId, role) {
-        const conn = connect.promise();
+    async getDisputeById(id, userId, role, conn = connect.promise()) {
 
         const [rows] = await conn.query(
             `SELECT
@@ -343,11 +367,16 @@ const disputeService = {
         params.push(id);
 
         const [result] = await conn.query(
-            `UPDATE dispute SET ${fields.join(", ")} WHERE id = ?`,
+            `UPDATE dispute SET ${fields.join(", ")} WHERE id = ?
+             AND status ${role === "admin" ? "NOT IN ('resolvida', 'rejeitada')" : "= 'aberta'"}`,
             params
         );
 
-        if (result.affectedRows === 0) return null;
+        if (result.affectedRows === 0) {
+            const err = new Error("O status da disputa mudou durante a atualização. Consulte a disputa novamente.");
+            err.code = "DISPUTE_STATUS_CONFLICT";
+            throw err;
+        }
 
         return disputeService.getDisputeById(id, userId, role);
     },
@@ -359,43 +388,7 @@ const disputeService = {
     // e a data. Muda status para 'resolvida'.
     // =========================================================
     async resolveDispute(id, resolution, resolvedById) {
-        const conn = connect.promise();
-
-        const [rows] = await conn.query(
-            `SELECT status
-             FROM dispute
-             WHERE id = ?
-             LIMIT 1`,
-            [id]
-        );
-
-        if (rows.length === 0) return null;
-
-        const { status } = rows[0];
-
-        if (FINAL_STATUS.includes(status)) {
-            const err = new Error(
-                "Esta disputa já foi finalizada e não pode ser resolvida novamente."
-            );
-            err.code = "DISPUTE_ALREADY_FINAL";
-            throw err;
-        }
-
-        const [result] = await conn.query(
-            `UPDATE dispute
-             SET
-                status         = 'resolvida',
-                resolution     = ?,
-                id_resolved_by = ?,
-                resolved_in    = NOW(),
-                updated_in     = NOW()
-             WHERE id = ?`,
-            [resolution, uuid.toBin(resolvedById), id]
-        );
-
-        if (result.affectedRows === 0) return null;
-
-        return disputeService.getDisputeById(id, resolvedById, "admin");
+        return finalizeDispute(id, resolution, resolvedById, "resolvida");
     },
 
 
@@ -406,43 +399,7 @@ const disputeService = {
     // 'rejeitada'.
     // =========================================================
     async rejectDispute(id, resolution, resolvedById) {
-        const conn = connect.promise();
-
-        const [rows] = await conn.query(
-            `SELECT status
-             FROM dispute
-             WHERE id = ?
-             LIMIT 1`,
-            [id]
-        );
-
-        if (rows.length === 0) return null;
-
-        const { status } = rows[0];
-
-        if (FINAL_STATUS.includes(status)) {
-            const err = new Error(
-                "Esta disputa já foi finalizada e não pode ser rejeitada novamente."
-            );
-            err.code = "DISPUTE_ALREADY_FINAL";
-            throw err;
-        }
-
-        const [result] = await conn.query(
-            `UPDATE dispute
-             SET
-                status         = 'rejeitada',
-                resolution     = ?,
-                id_resolved_by = ?,
-                resolved_in    = NOW(),
-                updated_in     = NOW()
-             WHERE id = ?`,
-            [resolution, uuid.toBin(resolvedById), id]
-        );
-
-        if (result.affectedRows === 0) return null;
-
-        return disputeService.getDisputeById(id, resolvedById, "admin");
+        return finalizeDispute(id, resolution, resolvedById, "rejeitada");
     }
 
 };
