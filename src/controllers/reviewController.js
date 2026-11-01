@@ -1,5 +1,6 @@
 
 const reviewService = require("../services/reviewService");
+const notificationService = require("../services/notificationService");
 const uuid = require("../utils/uuid");
 
 
@@ -61,6 +62,21 @@ const createReview = async (req, res) => {
             id_reviewer: req.userId,
             id_reviewed
         });
+
+        // O INSERT já foi confirmado. Não expor o comentário livre nem desfazer
+        // a avaliação se a persistência/entrega do aviso falhar.
+        try {
+            await notificationService.notifyUser({
+                id_user: id_reviewed,
+                type: "nova_review",
+                title: "Nova avaliação recebida",
+                content: `Você recebeu uma avaliação de ${rating} estrela(s).`,
+                reference_table: "review",
+                reference_id: id
+            });
+        } catch (error) {
+            console.error("Erro ao notificar nova avaliação:", error.code || "NOTIFICATION_FAILED");
+        }
 
         return res.status(201).json({
             message: "Avaliação cadastrada com sucesso.",

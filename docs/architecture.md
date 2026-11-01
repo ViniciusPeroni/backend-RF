@@ -55,6 +55,10 @@ src/
 
 `shoppingService.updateStatus(id, newStatus, { onlyPending = false } = {})` lê o status sob `SELECT ... FOR UPDATE`, aplica as restrições e retorna `{ shopping, previousStatus, changed }`. A compra retornada é lida na mesma conexão/transação antes do commit. Os controllers preservam a resposta HTTP e só notificam se `changed`; `/cancel` também valida `pending` sob o lock. Falhas de notificação não desfazem a transição já confirmada. Não há outbox/fila/retry persistente: uma queda entre commit e aviso pode deixar de produzir a notificação.
 
+`reviewController.createReview` avisa o avaliado após o INSERT; a UNIQUE por compra/autor impede duplicatas simultâneas. Edição não notifica. `disputeService.createDispute` bloqueia a compra em uma conexão transacional antes de conferir disputa ativa do mesmo autor e inserir. Resolver/rejeitar compartilham uma finalização que bloqueia a disputa, impede estados finais repetidos e devolve o snapshot antes do commit. A edição comum usa uma condição de status no UPDATE para não desfazer finalização concorrente. Os formatos de retorno dos services de review/disputa permanecem iguais.
+
+`disputeService.getNotificationRecipients(shoppingId, { includeAdmins = false } = {})` busca comprador/vendedores e, na abertura, admins ativos. O controller deduplica IDs, exclui o autor apenas na abertura e trata cada falha de aviso separadamente. O serviço central `notifyUser` continua responsável por persistir e emitir o evento. A falha ao consultar destinatários também não desfaz a operação já confirmada.
+
 ## Riscos de compatibilidade
 
 `src/index.js` requer `./db/testConnect`, mas o arquivo no repositório é `src/db/testconnect.js`. A resolução pode funcionar em Windows/macOS e falhar em filesystem sensível a caixa (Linux/CI). Não confunda compatibilidade local com portabilidade.

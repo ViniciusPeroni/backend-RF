@@ -33,6 +33,8 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - Separe comportamento simulado de entrega SMTP/OAuth real; não reporte integração externa sem evidência do provedor.
 - A suíte de notificações mantém casos com IO simulado e também sobe Socket.IO real no servidor HTTP local: verifica os quatro eventos de notificação em duas sessões do dono, isolamento de outro usuário/anônimo/JWT inválido ou já expirado, reconexão e recuperação HTTP de avisos persistidos offline. `tests/helpers/notificationSocketClient.js` implementa somente o transporte WebSocket Engine.IO v4/namespace padrão para teste, sem polling/retry e sem nova dependência.
 - Cadastro tem envio de OTP substituído no teste; não exercita SMTP/OAuth reais. O teste de falha de notificação injeta uma rejeição do serviço para comprovar que a compra continua confirmada.
+- `tests/helpers/reviewDisputeNotifications.js`, chamado pela mesma suíte de notificações, cobre os avisos de review e disputa, destinatários/admins ativos, rejeição de acessos indevidos, concorrência, leitura obsoleta na edição e falhas de aviso/consulta. Usa HTTP, MySQL e entrega Socket.IO reais; só injeta falhas ou intercala operações para reproduzir cenários específicos.
+- Abertura de disputa avisa todos os admins ativos: os novos cenários recusam banco que já possua admins ativos fora das fixtures. Use banco descartável. A limpeza remove reviews/disputas por UUID de compra antes de excluir compras/usuários sintéticos.
 - Não conecte teste a dados pessoais ou produção.
 
 ## Níveis de evidência

@@ -38,6 +38,13 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
+| review | `POST /review/`, `POST /review/create` | JWT | Cria avaliação bilateral em compra `completed`; uma por autor/compra (UNIQUE), duplicata retorna 409; avisa somente `id_reviewed` com `nova_review` |
+| review | `GET /review/`, `GET /review/:id` | Público | Consulta avaliações; não envia notificação |
+| review | `PUT/DELETE /review/:id` | JWT | Autor ou admin; editar/excluir não envia `nova_review` |
+| dispute | `POST /dispute/`, `POST /dispute/create` | JWT | Comprador ou vendedor abre disputa; duplicata ativa do mesmo autor/compra retorna 409; avisa demais partes e admins ativos com `disputa_aberta` |
+| dispute | `GET /dispute/`, `GET /dispute/:id` | JWT | Admin ou participantes da compra conforme service |
+| dispute | `PUT /dispute/:id` | JWT | Autor edita type/description enquanto `aberta`; admin também pode definir `aberta`/`em_analise`; sem novo aviso; estado alterado concorrentemente pode retornar 409 |
+| dispute | `PATCH /dispute/:id/resolve`, `PATCH /dispute/:id/reject` | JWT + admin | Recebe `resolution`; finaliza `aberta` ou `em_analise`, avisa todas as partes com `disputa_resolvida`; repetição/conflito entre finalizações retorna 409 |
 | card | `POST /card/create` | JWT | Cadastra cartão tokenizado do próprio usuário; `payment_token` é gravado e nunca retornado; JWT de usuário removido responde 401 |
 | card | `GET /card/` | JWT | Lista somente os cartões de `req.userId`; token não é exposto |
 | card | `GET /card/:id` | JWT | Detalhe do próprio cartão; cartão de outro usuário responde 404 |
@@ -79,7 +86,7 @@ Eventos de notificação não são reproduzidos automaticamente após reconectar
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
 - Cartões têm CRUD autenticado e restrito ao dono, mas o pagamento (`payment`) continua sem rotas e sem integração com gateway. O `payment_token` armazenado não é devolvido pela API.
-- O schema inclui pagamento, disputa, avaliação e impacto ambiental, mas ainda não há rotas correspondentes a esses fluxos.
-- Gatilhos automáticos existentes incluem `nova_mensagem`, notificações `sistema` no cadastro/ativação OTP e cancelamento de compra, `reserva_solicitada` na criação de compra e `reserva_aceita`/`reserva_recusada` no aceite/recusa. Pagamento, review e disputa ainda não têm eventos de domínio conectados; o contrato para essas branches está em [`notification-integration.md`](notification-integration.md).
+- Review e disputa têm rotas e notificações integradas. Impacto ambiental tem rotas montadas em `/environmental-impact`, não exercitadas nesta integração; pagamento continua sem fluxo REST.
+- Os tipos `nova_review`, `disputa_aberta` e `disputa_resolvida` estão conectados aos controllers de domínio; `pagamento_confirmado` continua bloqueado pela ausência de Payment. Destinatários, concorrência e limites estão em [`notification-integration.md`](notification-integration.md).
 - Log não tem JWT explícito nas rotas atuais. Todas as rotas de `localization` agora exigem JWT (inclusive o POST, com `userId` restrito ao token); a única rota pública é `GET /localization/product/:productId` com token opcional. Rotas shopping-product têm JWT, mas não verificam ownership no controller atual. `PUT`/`DELETE /product/:id` restringem a mutação ao dono via `id_user`; as rotas de foto ainda não verificam propriedade.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).
