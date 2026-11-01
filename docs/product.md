@@ -30,10 +30,12 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Logs | CRUD montado | Rota presente sem JWT explícito; não presumir seguro para exposição pública |
 | Documentos | Rotas JWT/admin | Há operações; revisão de ownership necessária para criação/listagens/metadados |
 | Chat | `send_message` e `join_conversation` via Socket.IO | Mensagem e notificação persistidas; entrada na conversa exige identidade e participação |
-| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD, contagem e leitura/exclusão sincronizadas; gatilhos de mensagem, cadastro, OTP, criação/aceite/recusa/cancelamento de compra; testes com transporte real e proteção contra aceite concorrente duplicado |
+| Notificações | Rotas autenticadas, serviço e eventos Socket.IO | CRUD, contagem e leitura/exclusão sincronizadas; gatilhos de mensagem, cadastro, OTP, reservas, review e disputa; pagamento ainda bloqueado; testes com transporte real e concorrência |
 | Reserva/negociação | Tabelas e fluxo de compra | Criação notifica `reserva_solicitada`; aceite/recusa notifica `reserva_aceita`/`reserva_recusada`; cancelamento notifica `sistema` aos vendedores |
 | Pagamento/comissão | Tabelas, sem integração/rotas correspondentes | Não afirmar pagamento disponível |
-| Disputa/review/impacto ambiental | Estruturas no schema, sem rotas correspondentes | Não afirmar fluxo disponível |
+| Reviews | `/review/*` | Avaliação bilateral em compra concluída; avisa o avaliado na criação, não na edição |
+| Disputas | `/dispute/*` | Participantes abrem, admin resolve/rejeita; avisos de abertura/finalização integrados e concorrência protegida |
+| Impacto ambiental | Rotas montadas em `/environmental-impact` | API presente; não exercitada nesta tarefa de notificações |
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |
 
 Este snapshot não é roadmap aprovado. Antes de atualizar estados, obtenha evidência executável conforme [`feature-readiness.md`](feature-readiness.md).
