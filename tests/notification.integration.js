@@ -30,6 +30,9 @@ const uuid = require('../src/utils/uuid');
 const notificationRoutes = require('../src/routes/modules/notificationRoutes');
 const otpRoutes = require('../src/routes/modules/otpRoutes');
 const shoppingRoutes = require('../src/routes/modules/shoppingRoutes');
+const reviewRoutes = require('../src/routes/modules/reviewRoutes');
+const disputeRoutes = require('../src/routes/modules/disputeRoutes');
+const { runReviewDisputeNotificationTests } = require('./helpers/reviewDisputeNotifications');
 const shoppingService = require('../src/services/shoppingService');
 const notificationService = require('../src/services/notificationService');
 const {
@@ -115,6 +118,7 @@ async function main() {
     const productC1Id = uuid.generateId();
 
     const shoppingIds = [];
+    const extraUserIds = [];
     let signupUserId = null;
     const otpUserId = uuid.generateId();
     let httpServer;
@@ -211,6 +215,8 @@ async function main() {
         app.use('/api/reaproveitafranca/notification', notificationRoutes);
         app.use('/api/reaproveitafranca/otp', otpRoutes);
         app.use('/api/reaproveitafranca/shopping', shoppingRoutes);
+        app.use('/api/reaproveitafranca/review', reviewRoutes);
+        app.use('/api/reaproveitafranca/dispute', disputeRoutes);
         if (userRoutes) {
             app.use('/api/reaproveitafranca/user', userRoutes);
         }
@@ -1188,6 +1194,13 @@ async function main() {
             await reconnected.waitForEvent('notification', (payload) => payload.id === online.body.id);
         });
 
+        await runReviewDisputeNotificationTests({
+            req, checkAsync, shoppingIds, extraUserIds, openClient, io: realIo,
+            users: { buyerId, sellerBId, sellerCId, adminId, outsiderId: otpUserId },
+            tokens: { buyer: tokenA, sellerB: tokenB, sellerC: tokenC, admin: adminToken },
+            products: { productB1Id, productB2Id, productC1Id }
+        });
+
     } catch (error) {
         fail('erro inesperado no teste', error);
     } finally {
@@ -1206,6 +1219,12 @@ async function main() {
         }
 
         if (shoppingIds.length > 0) {
+            for (const table of ['review', 'dispute']) {
+                await tryCleanup(table, () => connect.promise().query(
+                    `DELETE FROM ${table} WHERE id_shopping IN (${shoppingIds.map(() => '?').join(', ')})`,
+                    shoppingIds.map((id) => uuid.toBin(id))
+                ));
+            }
             await tryCleanup('shopping', () => connect.promise().query(
                 `DELETE FROM shopping WHERE id IN (${shoppingIds.map(() => '?').join(', ')})`,
                 shoppingIds.map((id) => uuid.toBin(id))
@@ -1233,7 +1252,7 @@ async function main() {
             ));
         }
 
-        const syntheticUsers = [buyerId, sellerBId, sellerCId, otpUserId];
+        const syntheticUsers = [buyerId, sellerBId, sellerCId, otpUserId, ...extraUserIds];
         if (signupUserId) syntheticUsers.push(signupUserId);
 
         await tryCleanup('notification', () => connect.promise().query(
