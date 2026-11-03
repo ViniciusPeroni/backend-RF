@@ -56,6 +56,10 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | localization | `PUT /localization/:id` | JWT | Atualiza campos da própria localização; valida o estado final; `latitude`/`longitude` são opcionais e `null` limpa a coordenada |
 | localization | `DELETE /localization/:id` | JWT | Exclui a própria localização; se vinculada a anúncio (FK RESTRICT) responde 409 |
 | localization | `GET /localization/product/:productId` | Token opcional | Visão pública do anúncio (RN10): sem reserva aceita devolve apenas `city`/`neighborhood` com `latitude`/`longitude` arredondadas (2 casas); dono ou comprador com shopping `accepted`/`completed` recebe `street`/`number`/`zipCode`/`state` e coordenadas exatas |
+| commission | `POST /commission/payment/:paymentId` | JWT + admin + limitador global | Gera comissão de 8% sobre pagamento aprovado; repetição retorna comissão existente |
+| payment | `POST /payment/checkout` | JWT + limitador global | Recebe `shoppingId` e `method`; service permite apenas o comprador e shopping `accepted`, calcula total do banco e cria/retoma preferência Checkout Pro |
+| payment | `GET /payment/:paymentId` | JWT + limitador global | Consulta status/método/valor; somente comprador dono ou admin |
+| payment | `POST /payment/webhook` | Público + limitador global | Valida `x-signature`, `x-request-id` e ID da notificação; consulta o pagamento no provedor antes de atualizar estado local |
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
 | document | `GET /document/:id/decrypt`, `DELETE /document/:id` | JWT + admin | Descriptografar/excluir documento |
@@ -86,7 +90,8 @@ Eventos de notificação não são reproduzidos automaticamente após reconectar
 
 - Compras e itens de compra agora têm rotas REST. Isso não implica pagamento integrado, negociação completa ou demais fluxos do schema.
 - Cartões têm CRUD autenticado e restrito ao dono, mas o pagamento (`payment`) continua sem rotas e sem integração com gateway. O `payment_token` armazenado não é devolvido pela API.
-- Review e disputa têm rotas e notificações integradas. Impacto ambiental tem rotas montadas em `/environmental-impact`, não exercitadas nesta integração; pagamento continua sem fluxo REST.
+- Review e disputa têm rotas e notificações integradas. Impacto ambiental tem rotas montadas em `/environmental-impact`, não exercitadas nesta integração; pagamento possui fluxo Checkout Pro em sandbox.
 - Os tipos `nova_review`, `disputa_aberta` e `disputa_resolvida` estão conectados aos controllers de domínio; `pagamento_confirmado` continua bloqueado pela ausência de Payment. Destinatários, concorrência e limites estão em [`notification-integration.md`](notification-integration.md).
 - Log não tem JWT explícito nas rotas atuais. Todas as rotas de `localization` agora exigem JWT (inclusive o POST, com `userId` restrito ao token); a única rota pública é `GET /localization/product/:productId` com token opcional. Rotas shopping-product têm JWT, mas não verificam ownership no controller atual. `PUT`/`DELETE /product/:id` restringem a mutação ao dono via `id_user`; as rotas de foto ainda não verificam propriedade.
+- Checkout Pro tem rotas autenticadas para iniciar/retomar preferência e consultar estado local em sandbox; webhook assinado atualiza estado e gera comissão idempotente para aprovações. Configure o segredo e aplique as migrações manuais antes de habilitar notificações.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).

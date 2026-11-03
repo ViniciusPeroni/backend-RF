@@ -14,6 +14,7 @@
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
 - Não há suíte completa de testes, lint, typecheck ou build. Existe `npm run test:notification` para integração de notificações, que exige `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. Use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- Mercado Pago usa `MP_ACCESS_TOKEN`; `MP_ENVIRONMENT` assume `sandbox` por padrão. Não habilite produção sem autorização/configuração explícita.
 
 ## Fluxo de trabalho do agente
 
@@ -34,6 +35,7 @@
 - Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
 - `shoppingService.updateStatus` retorna `{ shopping, previousStatus, changed }`, decididos sob lock transacional. Controllers notificam apenas quando `changed`; `/cancel` exige `onlyPending` dentro da transação. Esses metadados não fazem parte da resposta HTTP.
 - `npm run test:notification` cobre MySQL/HTTP e transporte Socket.IO real (WebSocket nativo; Node.js 22+), inclusive review/disputa. Para evitar avisos sintéticos a pessoas reais, os casos de disputa recusam banco que já possua admins ativos antes das fixtures. O teste não exercita SMTP/OAuth reais, carga nem clientes web/mobile.
+- Pagamentos: checkout exige JWT do comprador e compra aceita; webhook assinado atualiza status e dispara comissão aprovada. Configure `MP_WEBHOOK_SECRET` e aplique `migration_mercado_pago_payment_id.sql` antes de habilitar notificações.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testConnect`, mas o arquivo versionado é `src/db/testconnect.js`; sistemas sensíveis a maiúsculas/minúsculas podem falhar.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
@@ -41,7 +43,7 @@
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migração aditiva social: `src/mysql-init/migration_social_login.sql`. Não há framework de migração.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, `migration_mercado_pago.sql` e `migration_mercado_pago_payment_id.sql`. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
 - JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.

@@ -10,6 +10,8 @@ router.use("/dispute", require("./modules/disputeRoutes"));
 router.use("/environmental-impact", require("./modules/environmentalImpactRoutes"));
 router.use("/shopping", require("./modules/shoppingRoutes"));
 router.use("/shopping-product", require("./modules/shoppingProductRoutes"));
+router.use("/commission", require("./modules/commissionRoutes"));
+router.use("/payment", require("./modules/paymentRoutes"));
 router.use("/log", require("./modules/logRoutes")); 
 router.use("/notification", require("./modules/notificationRoutes"));
 router.use("/conversation", require("./modules/conversationRoutes"));

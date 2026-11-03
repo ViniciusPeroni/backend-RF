@@ -11,6 +11,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 - Cadastro diferencia `user`, `company` e `admin`; endpoints públicos definem o papel e descartam `role` enviado pelo cliente.
 - Cadastro comum/empresa usa OTP. Status do schema incluem `awaitingForEmail`, `firstLogin`, `active`, `inactive`.
 - Produtos diferenciam venda e doação; venda exige preço e doação não aceita preço conforme validação atual. Fotos têm endpoints separados.
+- `payment.method` representa Pix, cartão de débito, cartão de crédito ou saldo Mercado Pago (`account_money`); o cliente escolhe um método antes do Checkout Pro.
 - Compras podem ser criadas com itens; serviço verifica disponibilidade/estoque e atualiza estoque dentro de transação. Cancelamento/restauração e atualização de status também têm endpoints.
 - Categorias e estados do produto são enums do schema; consulte `RFScript.sql` e controller antes de adicionar valor.
 - CPF/CNPJ não são armazenados em claro: HMAC para deduplicação e cifra AES-256-GCM.
@@ -36,6 +37,7 @@ Requisitos do TCC, tabelas e enums podem representar planos ou modelo de dados, 
 | Reviews | `/review/*` | Avaliação bilateral em compra concluída; avisa o avaliado na criação, não na edição |
 | Disputas | `/dispute/*` | Participantes abrem, admin resolve/rejeita; avisos de abertura/finalização integrados e concorrência protegida |
 | Impacto ambiental | Rotas montadas em `/environmental-impact` | API presente; não exercitada nesta tarefa de notificações |
+
 | Mapas/classificação de materiais | Não confirmado nas rotas | Não afirmar API implementada |
 
 Este snapshot não é roadmap aprovado. Antes de atualizar estados, obtenha evidência executável conforme [`feature-readiness.md`](feature-readiness.md).
