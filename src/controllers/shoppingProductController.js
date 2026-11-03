@@ -10,11 +10,12 @@ const getItems = async (req, res) => {
             id_product: productId
         };
 
-        const items = await shoppingProductService.getItems(filters);
+        const items = await shoppingProductService.getItems(filters, { id: req.userId, role: req.role });
 
         return res.status(200).json(items);
 
     } catch (error) {
+        if ([400, 401].includes(error.status)) return res.status(error.status).json({ error: error.message });
         console.error("Erro em getItems de shoppingProduct:", error);
 
         return res.status(500).json({
@@ -34,7 +35,7 @@ const getItemById = async (req, res) => {
             });
         }
 
-        const item = await shoppingProductService.getItemById(id);
+        const item = await shoppingProductService.getItemById(id, { id: req.userId, role: req.role });
 
         if (!item) {
             return res.status(404).json({
@@ -45,6 +46,7 @@ const getItemById = async (req, res) => {
         return res.status(200).json(item);
 
     } catch (error) {
+        if ([400, 401].includes(error.status)) return res.status(error.status).json({ error: error.message });
         console.error("Erro em getItemById de shoppingProduct:", error);
 
         return res.status(500).json({
@@ -64,11 +66,12 @@ const getItemsByShoppingId = async (req, res) => {
             });
         }
 
-        const items = await shoppingProductService.getItemsByShoppingId(shoppingId);
+        const items = await shoppingProductService.getItemsByShoppingId(shoppingId, { id: req.userId, role: req.role });
 
         return res.status(200).json(items);
 
     } catch (error) {
+        if ([400, 401].includes(error.status)) return res.status(error.status).json({ error: error.message });
         console.error("Erro em getItemsByShoppingId:", error);
 
         return res.status(500).json({

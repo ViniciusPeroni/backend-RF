@@ -4,7 +4,7 @@ try {
 } catch (e) {
   require("dotenv").config();
 }
-const testConnect = require("./db/testConnect");
+const testConnect = require("./db/testconnect");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 //require("./cron")

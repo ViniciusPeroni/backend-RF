@@ -484,55 +484,29 @@ async function findOrCreateSocialUser({ provider, providerId, email, name }) {
 
 // POST /user/login/google — Opção A (ID Token, sem OAuth completo)
 const loginGoogle = async (req, res) => {
-    const idToken = req.body.idToken || req.body.credential;
-
-    if (!idToken) {
-        return res.status(400).json({ error: 'idToken é obrigatório.' });
-    }
-
-    if (!process.env.GOOGLE_CLIENT_ID) {
-        return res.status(500).json({ error: 'Login Google não configurado.' });
-    }
-
+    const idToken = req.body?.idToken || req.body?.credential;
+    if (typeof idToken !== 'string' || !idToken.trim() || idToken.length > 10000) return res.status(400).json({ error: 'idToken é obrigatório e deve ser textual.' });
+    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    if (!clientId || !process.env.SECRET) return res.status(503).json({ error: 'Login Google não configurado.' });
+    let payload;
     try {
-        const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-        const ticket = await client.verifyIdToken({
-            idToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        const payload = ticket.getPayload();
-
-        if (!payload || !payload.sub || !payload.email) {
-            return res.status(401).json({ error: 'Token Google inválido.' });
-        }
-
-        // Só linka conta local se o Google confirmou o email (anti-sequestro).
-        if (!payload.email_verified) {
-            return res.status(403).json({ error: 'E-mail do Google não verificado.' });
-        }
-
-        const user = await findOrCreateSocialUser({
-            provider: 'google',
-            providerId: payload.sub,
-            email: payload.email,
-            name: payload.name,
-        });
-
-        if (user.status !== 'active' && user.status !== 'firstLogin') {
-            return res.status(403).json({ error: 'Conta ainda não ativada.' });
-        }
-
-        const token = issueSocialToken(user);
-
-        return res.status(200).json({
-            message: 'Login com Google realizado com sucesso.',
-            token,
-            user,
-            mustChangePassword: false,
-        });
+        const client = new OAuth2Client(clientId);
+        const ticket = await client.verifyIdToken({ idToken, audience: clientId });
+        payload = ticket.getPayload();
     } catch (error) {
-        console.error('Erro em loginGoogle:', error.message);
-        return res.status(401).json({ error: 'Token Google inválido ou expirado.' });
+        const networkError = ['ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET'].includes(error.code) || error.response?.status >= 500;
+        return res.status(networkError ? 503 : 401).json({ error: networkError ? 'Google temporariamente indisponível.' : 'Token Google inválido ou expirado.' });
+    }
+    if (!payload || typeof payload.sub !== 'string' || !payload.sub || payload.sub.length > 255 || typeof payload.email !== 'string' || payload.email.length > 255 || !isValidEmail(payload.email.trim())) return res.status(401).json({ error: 'Token Google inválido.' });
+    if (payload.email_verified !== true) return res.status(403).json({ error: 'E-mail do Google não verificado.' });
+    try {
+        const { user, created } = await require('../services/googleLoginService').findOrCreateGoogleUser(payload);
+        if (created) await notifyWelcome(user.id, user.role);
+        const token = issueSocialToken(user);
+        return res.status(200).json({ message: 'Login com Google realizado com sucesso.', token, user, mustChangePassword: user.status === 'firstLogin' });
+    } catch (error) {
+        if ([403, 409].includes(error.status)) return res.status(error.status).json({ error: error.message });
+        return res.status(500).json({ error: 'Não foi possível concluir o acesso com Google. Tente novamente.' });
     }
 };
 
@@ -744,6 +718,8 @@ const updateUser = async (req, res) => {
         }
 
         if (req.file) {
+            if (req.file.size > 5 * 1024 * 1024) return res.status(413).json({ error: 'A foto deve ter até 5 MB.' });
+            if (!require('../utils/imageType')(req.file.buffer)) return res.status(415).json({ error: 'Escolha uma foto JPG, PNG, WebP ou GIF.' });
             fields.photo = req.file.buffer;
         }
 
@@ -818,6 +794,26 @@ const deleteUser = async (req, res) => {
             return res.status(409).json({ error: 'Não é possível excluir: o usuário possui vínculos (conversas, compras etc.).' });
         }
         return res.status(500).json({ error: 'Erro ao excluir usuário.' });
+    }
+};
+
+// Authenticated image read; photos never become public URLs.
+const getUserPhoto = async (req, res) => {
+    const { id } = req.params;
+    res.set('Cache-Control', 'private, no-store');
+    if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
+    if (req.role !== 'admin' && String(req.userId).toLowerCase() !== id.toLowerCase()) return res.status(403).json({ error: 'Acesso negado.' });
+    try {
+        const [rows] = await connect.promise().query('SELECT photo FROM `user` WHERE id = ?', [uuid.toBin(id)]);
+        if (!rows.length) return res.status(404).json({ error: 'Usuário não encontrado.' });
+        const photo = rows[0].photo;
+        if (!photo || !photo.length) return res.status(204).end();
+        const type = require('../utils/imageType')(photo);
+        if (!type) return res.status(415).json({ error: 'Formato de foto não suportado.' });
+        res.set('X-Content-Type-Options', 'nosniff');
+        return res.type(type).send(photo);
+    } catch {
+        return res.status(500).json({ error: 'Não foi possível consultar a foto.' });
     }
 };
 
@@ -1031,4 +1027,4 @@ const firstAccessPassword = async (req, res) => {
     }
 };
 
-module.exports = { createUser, createAdmin, createCompany, loginUser, loginGoogle, linkedinAuthUrl, linkedinCallback, getAllUsers, getUsersByName, updateUser, deleteUser, getUserById, patchPassword, forgotPassword, resetPassword, firstAccessPassword };
+module.exports = { createUser, createAdmin, createCompany, loginUser, loginGoogle, linkedinAuthUrl, linkedinCallback, getAllUsers, getUsersByName, updateUser, deleteUser, getUserById, getUserPhoto, patchPassword, forgotPassword, resetPassword, firstAccessPassword };
