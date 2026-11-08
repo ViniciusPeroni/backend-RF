@@ -12,13 +12,16 @@ MERCADO_PAGO_ENV=test
 MERCADO_PAGO_ACCESS_TOKEN=
 MERCADO_PAGO_WEBHOOK_SECRET=
 PAYMENT_COMMISSION_PERCENT=5
+split_payment=false
 ```
 
-4. Execute as migrações aditivas `src/mysql-init/migration_payment_gateway.sql` e `src/mysql-init/migration_payment_distribution.sql` no banco configurado. **Não execute RFScript.sql** em banco existente.
+4. Execute as migrações aditivas `src/mysql-init/migration_payment_gateway.sql`, `src/mysql-init/migration_payment_distribution.sql`, `src/mysql-init/migration_payment_split.sql` e, uma vez após esta última, `src/mysql-init/migration_payment_account_disconnect.sql` no banco configurado. **Não execute RFScript.sql** em banco existente.
 5. Reinicie a API. O padrão continua `simulated`; esse provedor é bloqueado com `NODE_ENV=production`.
 6. Publique uma URL HTTPS de desenvolvimento para a API e configure no painel o tópico **Orders**, ambiente Teste, com URL `https://SEU_HOST/api/reaproveitafranca/payment/webhook/mercado-pago`. Copie a assinatura secreta desse webhook para o `.env` e reinicie. Localhost não recebe chamadas externas.
 
 Credenciais do backend nunca vão para o cliente. A Public Key de teste é usada pelo SDK para tokenizar cartões. Use somente cartões oficiais de teste: https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/resources/test-cards .
+
+O modo padrão `split_payment=false` mantém o pagamento com uma conta. Para split real 1:1, OAuth do vendedor, novas variáveis e roteiro de ativação, consulte [payment-split.md](payment-split.md). As credenciais de produção não habilitam o split nem o webhook externo automaticamente.
 
 ## Contrato
 
@@ -43,18 +46,19 @@ Métodos locais: `pix`, `credit_card`, `debit_card`. Pix retorna `checkout.qr_co
 ## Repetição, falhas e estados
 
 - O ID local é a chave de idempotência da criação. Somente o hash do pedido é persistido, nunca token do cartão ou dados do pagador. Após timeout, repita exatamente os mesmos dados (incluindo o token original). Mudança de dados/provedor/ambiente com pagamento pendente retorna 409.
-- Erro HTTP 400/422 definitivo do provedor registra recusa local; uma nova tentativa pode corrigir os dados. Em timeout/5xx mantém pendente, pois a cobrança pode existir. Não crie outra tentativa até recuperar a resposta.
+- Erro HTTP 400/422 de validação reconhecida registra recusa local; uma nova tentativa pode corrigir os dados. Rejeições ambíguas exigem conciliação antes de nova cobrança. Em timeout/5xx mantém pendente, pois a cobrança pode existir. Não crie outra tentativa até recuperar a resposta.
 - Pendentes legados sem vínculo de provedor retornam 409; trocar a configuração não converte uma simulação em cobrança real.
 - `processed/accredited` confirma pagamento `approved` e compra `accepted`. A retirada/entrega e a conclusão não são confirmadas pelo webhook.
 - Falha/recusa deixa compra pendente e permite nova tentativa; estoque continua reservado. Cancelamento/expiração confirmados e reembolso integral cancelam compra e devolvem estoque uma única vez. Notificações repetidas não duplicam a devolução. Respostas atrasadas não rebaixam estados finais.
 - As alterações de compras recebidas da `main` restringem a rota genérica de status ao admin ou ao vendedor único dos itens, conforme o status solicitado. Cancelar uma compra localmente ainda não cancela a cobrança no Mercado Pago. Use cancelamento/reembolso do pagamento; uma aprovação posterior ao cancelamento local retorna `checkout.needs_review: true` para reconciliação/reembolso administrativo, sem reabrir a compra nem baixar estoque novamente. Essa pendência de integração com compras impede considerar o conjunto pronto para produção.
 - A comissão planejada usa `PAYMENT_COMMISSION_PERCENT`, padrão de 5%, sobre o valor dos itens no banco. O plano é persistido atomicamente em `payment_distribution` quando o pagamento é criado e retornado em `checkout.distribution`. Percentual e valores históricos não mudam ao repetir a requisição. O cálculo usa centavos e conserva a soma entre fornecedores, inclusive no arredondamento.
-- Esse plano não transfere dinheiro, não desconta comissão no Mercado Pago e não registra comissão como recebida. `transfers_executed` é false e `settlement_status` é `not_configured` (ou `not_applicable` para pagamento recusado/reembolsado). Valores dos fornecedores são anteriores às taxas do provedor. O repasse real depende da vinculação dos vendedores e de uma modalidade de split compatível/habilitada; a Orders API atual não recebe `application_fee` como se fosse a Payments API.
-- A API consulta a conta do Access Token e exige coerência entre conta de teste e `MERCADO_PAGO_ENV=test`, ou conta real e `production`, antes de criar o pagamento. O hash de repetição também considera a conta recebedora. Registros antigos não são convertidos por trocar a chave ou o ambiente.
+- Com split desligado, o plano é informativo: `transfers_executed=false` e `settlement_status=disabled`; não há desconto ou repasse automático. Com split ligado, a Payments API usa OAuth do vendedor e `application_fee`, sem enviar esse campo para Orders. A aprovação só é aceita com recebedor, valor e comissão compatíveis; registra a comissão e retorna `provider_confirmed`. Estorno integral confirmado zera a comissão líquida local. Valores dos fornecedores são anteriores às tarifas do provedor; detalhes em [payment-split.md](payment-split.md).
+- A API consulta a conta do Access Token e exige coerência com `MERCADO_PAGO_ENV` antes de criar o pagamento. Para uma conta real, exige `MERCADO_PAGO_CLIENT_ID`, consulta a aplicação e compara a credencial com `test_access_token`; isso permite a credencial de teste da aplicação sem exigir que seu titular seja um usuário fictício e impede usá-la em `production`. Usuários de teste continuam aceitos somente em `test`. O hash considera a conta recebedora, impressão da credencial principal e vínculo do split. Pendentes anteriores à proteção de credencial podem exigir consulta/sincronização em vez de repetir o cadastro. Registros antigos não são convertidos por trocar a chave, flag ou ambiente.
 - Uma consulta externa 404 retorna conflito local 409 com `provider_code: order_not_found`, evitando tratar troca de conta como indisponibilidade. Após 402 na criação, a API busca a order por `external_reference` (ID local), com intervalo de datas obrigatório, e consulta seu detalhe antes de atualizar o banco. Exige uma única order, referência, valor e método compatíveis. Não envia outra cobrança nessa conciliação.
 - Se a order confirmar falha, persiste IDs externos, `refused` e motivo em `checkout.status_detail`; a resposta 402 inclui `payment_id`, `provider_order_id`, `payment_status`, `status_detail` e `reconciliation_required: false`. A compra continua pendente com estoque reservado, permitindo uma nova tentativa após corrigir a causa.
 - Se a consulta após 402 falhar ou ainda não localizar a order, mantém o pagamento pendente e grava `reconciliation_required` no vínculo. A resposta inclui `payment_id` e `reconciliation_required: true`. Repetir o cadastro desse pendente só consulta a order; não reenvia o POST externo. Use `/payment/:id/sync` até confirmar o resultado. Essa rota também recupera pagamentos anteriores que ficaram sem o ID da order. Timeouts/5xx na criação continuam permitindo repetição com a mesma chave/dados.
 - Reembolsos parciais, chargebacks e salvamento de cartões não têm fluxo de gestão implementado; os detalhes externos não equivalem a reembolso integral.
+- A transição real de pendente para aprovado notifica comprador, vendedores e administradores ativos pelo serviço existente, depois do commit. Chamadas repetidas/concorrentes não geram outra confirmação. Falha ao notificar não desfaz o pagamento; não há outbox ou retry garantido após queda do processo.
 
 ## cURLs para importar no Postman
 
@@ -138,7 +142,9 @@ pm.visualizer.set('{{#if qr}}<img src="data:image/png;base64,{{qr}}" width="320"
 
 ## Verificação
 
-O script `scripts/test-payment-integration.js` usa HTTP local, banco MySQL configurado e fixtures próprias que são removidas ao final. Intercepta todo acesso ao Mercado Pago com respostas de teste; não movimenta dinheiro nem comprova integração externa. Rode explicitamente com `RUN_PAYMENT_DB_TESTS=1` em banco de desenvolvimento.
+Use `RUN_PAYMENT_DB_TESTS=1` e `node scripts/test-payment-suite.js` para executar pagamentos e as integrações recebidas da main em banco temporário. O runner remove esse banco ao final. O script específico `scripts/test-payment-integration.js` usa HTTP local e fixtures próprias; intercepta todo acesso financeiro/OAuth ao Mercado Pago, sem movimentar dinheiro nem comprovar integração externa. Nunca execute testes contra banco de produção.
+
+Última validação local após implementar a desvinculação: 281 cenários aprovados, sendo 95 de pagamentos. Os fluxos de crédito e débito com split cobrem aprovação, recusa/nova tentativa, parcelas, confirmação posterior por webhook, recuperação de timeout e estorno integral sem duplicar comissão ou reposição de estoque. A desconexão e troca de conta preservam o histórico financeiro. Para os resultados externos e limites atuais das credenciais, veja [payment-split.md](payment-split.md#testes-externos-de-cartão).
 
 Validação realizada em 29/10/2026:
 

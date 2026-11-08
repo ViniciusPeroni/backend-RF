@@ -25,7 +25,11 @@ Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve
 
 ## Referência rápida
 
-Pagamentos: configuração do Mercado Pago, migração aditiva, contrato e cURLs no Postman em [payments.md](payments.md).
+Pagamentos: configuração do Mercado Pago, migrações aditivas, contrato e cURLs no Postman em [payments.md](payments.md). Split 1:1, OAuth e ativação em [payment-split.md](payment-split.md).
+
+Roteiro para concluir configuração, integração mobile, validação externa e publicação: [guia de implementação e liberação dos pagamentos](payment-implementation-guide.md).
+
+Execução local e diagnóstico do túnel HTTPS: [Cloudflare local](cloudflare-local.md).
 
 - Stack: Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO.
 - Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.

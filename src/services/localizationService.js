@@ -1,5 +1,6 @@
 const connect = require('../db/connect');
 const { generateId, isValid, toBin } = require('../utils/uuid');
+const { geocodeAddress } = require('./geocodeService');
 
 function parseCoordinate(value, label, min, max) {
     const coordinate = typeof value === 'number'
@@ -99,6 +100,17 @@ async function createLocalization({ userId, zipCode, street, neighborhood, numbe
 
     const id = generateId();
 
+    // Sem coordenadas no corpo, busca pelo endereço para o ponto aparecer no
+    // mapa. Se a busca falhar, salva sem coordenadas, como antes.
+    if (isAbsent(latitude) || isAbsent(longitude)) {
+        const coordinates = await geocodeAddress({ street, number, city, state });
+
+        if (coordinates) {
+            latitude = coordinates.latitude;
+            longitude = coordinates.longitude;
+        }
+    }
+
     await db.query(
         `INSERT INTO localization (id, zip_code, street, neighborhood, number, city, state, latitude, longitude, id_user)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -160,6 +172,27 @@ async function updateLocalization(id, userId, changes) {
     const db = connect.promise();
     const sets = [];
     const params = [];
+
+    // Endereço mudou sem coordenadas novas: recalcula para o ponto do mapa
+    // acompanhar o endereço (falha mantém as coordenadas antigas).
+    const addressChanged = ['street', 'number', 'city', 'state'].some(field => changes[field] !== undefined);
+
+    if (addressChanged && changes.latitude === undefined && changes.longitude === undefined) {
+        const existing = await getLocalizationById(id, userId);
+
+        if (existing) {
+            const coordinates = await geocodeAddress({
+                street: changes.street !== undefined ? changes.street : existing.street,
+                number: changes.number !== undefined ? changes.number : existing.number,
+                city: changes.city !== undefined ? changes.city : existing.city,
+                state: changes.state !== undefined ? changes.state : existing.state
+            });
+
+            if (coordinates) {
+                changes = { ...changes, latitude: coordinates.latitude, longitude: coordinates.longitude };
+            }
+        }
+    }
 
     for (const [key, value] of Object.entries(changes)) {
         const column = LOCALIZATION_COLUMNS[key];
@@ -298,8 +331,53 @@ async function getLocationByProduct(productId, viewerId) {
     };
 }
 
+/**
+ * Empresas ativas para o mapa (MapScreen).
+ *
+ * Um ponto por endereço com coordenadas. Segue a mesma regra da visão pública
+ * do anúncio (RN10): só cidade/bairro e coordenadas arredondadas (~1 km);
+ * rua, número e CEP não saem desta rota. `categories` traz as categorias dos
+ * anúncios disponíveis naquele endereço.
+ */
+async function getCompaniesForMap() {
+    const db = connect.promise();
+
+    const [rows] = await db.query(
+        `SELECT BIN_TO_UUID(l.id) AS id,
+                BIN_TO_UUID(u.id) AS companyId,
+                u.name,
+                l.neighborhood, l.city, l.state,
+                l.latitude, l.longitude,
+                GROUP_CONCAT(DISTINCT p.category) AS categories,
+                COUNT(DISTINCT p.id) AS availableProducts
+         FROM localization l
+         JOIN \`user\` u ON u.id = l.id_user
+         LEFT JOIN product p ON p.id_localization = l.id AND p.status = 'available'
+         WHERE u.role = 'company'
+           AND u.status = 'active'
+           AND l.latitude IS NOT NULL
+           AND l.longitude IS NOT NULL
+         GROUP BY l.id, u.id, u.name, l.neighborhood, l.city, l.state, l.latitude, l.longitude
+         ORDER BY u.name ASC`
+    );
+
+    return rows.map(row => ({
+        id: row.id,
+        companyId: row.companyId,
+        name: row.name,
+        neighborhood: row.neighborhood,
+        city: row.city,
+        state: row.state,
+        latitude: round2(row.latitude),
+        longitude: round2(row.longitude),
+        categories: row.categories ? row.categories.split(',') : [],
+        availableProducts: Number(row.availableProducts)
+    }));
+}
+
 module.exports = {
     validateLocalization,
+    getCompaniesForMap,
     createLocalization,
     getLocalizationsByUser,
     getLocalizationById,

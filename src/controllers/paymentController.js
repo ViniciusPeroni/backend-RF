@@ -70,7 +70,7 @@ const createPayment = async (req, res) => {
             });
         }
 
-        const prepared = await paymentProviderService.prepare(method, req.body || {}, shopping.user_email);
+        const prepared = await paymentProviderService.prepare(method, req.body || {}, shopping.user_email, shopping.id);
         const result = await paymentService.createPayment({
             id_shopping: shopping.id,
             userId: req.userId,

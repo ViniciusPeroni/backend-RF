@@ -123,6 +123,21 @@ const paymentService = {
                 [uuid.toBin(data.id_shopping)]
             );
             const distribution = paymentDistribution.calculate(items, shopping.value);
+            const split = data.gateway.split;
+            if (split) {
+                await conn.query("SELECT id FROM `user` WHERE id = ? FOR UPDATE", [uuid.toBin(split.seller_id)]);
+                const [accounts] = await conn.query(
+                    `SELECT id FROM payment_seller_account WHERE id = ? AND id_user = ? AND environment = ?
+                     AND collector_id = ? AND marketplace_id = ? AND application_id = ? AND disconnected_at IS NULL FOR UPDATE`,
+                    [uuid.toBin(split.account_id), uuid.toBin(split.seller_id), split.environment,
+                        split.collector_id, split.marketplace_id, process.env.MERCADO_PAGO_CLIENT_ID]
+                );
+                if (!accounts.length) throw createError("O vínculo Mercado Pago mudou antes da cobrança. Confira a conexão do vendedor.", 409);
+            }
+            if (split && (distribution.sellers.length !== 1 || distribution.sellers[0].seller_id !== split.seller_id ||
+                distribution.marketplace_amount !== split.application_fee || distribution.gross_amount !== split.gross_amount)) {
+                throw createError("Os itens ou a comissão mudaram durante o pagamento. Confira a compra antes de repetir.", 409);
+            }
 
             await conn.query(
                 `INSERT INTO payment (
@@ -150,6 +165,11 @@ const paymentService = {
                 "INSERT INTO payment_distribution (id_payment, plan) VALUES (?, ?)",
                 [uuid.toBin(id), JSON.stringify(distribution)]
             );
+            if (split) {
+                await conn.query(`INSERT INTO payment_split (id_payment, id_seller, id_account, environment, marketplace_id, collector_id, application_fee, gross_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [uuid.toBin(id), uuid.toBin(split.seller_id), uuid.toBin(split.account_id), split.environment,
+                    split.marketplace_id, split.collector_id, split.application_fee, split.gross_amount]);
+            }
             await conn.commit();
 
             return {

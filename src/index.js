@@ -4,7 +4,7 @@ try {
 } catch (e) {
   require("dotenv").config();
 }
-const testConnect = require("./db/testConnect");
+const testConnect = require("./db/testconnect");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 //require("./cron")
@@ -18,6 +18,7 @@ class AppController {
   }
 
   middlewares() {
+    this.express.set("trust proxy", "loopback");
     // Permite que a applicação receba dados em formato JSON nas requisições
     this.express.use(express.json());
     this.express.use(express.urlencoded({ extended: true })); // Necessário para receber dados de formulários HTML

@@ -8,10 +8,10 @@ No PowerShell, somente em banco de desenvolvimento:
 
 ```powershell
 $env:RUN_PAYMENT_DB_TESTS='1'
-node scripts/test-payment-integration.js
+node scripts/test-payment-suite.js
 ```
 
-O teste de pagamentos aplica somente migrações aditivas, cria fixtures exclusivas e remove-as ao final. Usa HTTP/MySQL reais e intercepta chamadas externas ao Mercado Pago; não valida o ambiente do provedor nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
+O runner de pagamentos cria um banco temporário vazio com as tabelas do schema versionado, executa pagamentos, cartões, localização e notificações e remove esse banco ao final. Não executa DROP/USE do RFScript.sql no banco existente. O teste específico de pagamentos aplica somente migrações aditivas e cria fixtures exclusivas. Usa HTTP/MySQL reais e intercepta chamadas financeiras e OAuth ao Mercado Pago; não valida o split externo nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
 
 O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 

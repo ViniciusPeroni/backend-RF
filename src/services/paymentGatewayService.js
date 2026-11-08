@@ -1,6 +1,7 @@
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
 const paymentError = require("../utils/paymentError");
+const paymentNotifications = require("./paymentNotificationService");
 
 async function getGateway(id) {
     const [rows] = await connect.promise().query("SELECT * FROM payment_gateway WHERE id_payment = ?", [uuid.toBin(id)]);
@@ -36,19 +37,24 @@ module.exports = {
     },
     async getCheckout(id) {
         const [rows] = await connect.promise().query(
-            `SELECT g.checkout, d.plan, p.status FROM payment_gateway g
+            `SELECT g.checkout, d.plan, p.status, s.id_payment AS split_id FROM payment_gateway g
              INNER JOIN payment p ON p.id = g.id_payment
              LEFT JOIN payment_distribution d ON d.id_payment = g.id_payment
+             LEFT JOIN payment_split s ON s.id_payment = g.id_payment
              WHERE g.id_payment = ?`, [uuid.toBin(id)]
         );
         const value = rows[0]?.checkout;
         if (!value) return null;
         const checkout = typeof value === "string" ? JSON.parse(value) : value;
+        checkout.split_payment = !!rows[0].split_id;
         const plan = typeof rows[0].plan === "string" ? JSON.parse(rows[0].plan) : rows[0].plan;
         if (plan) {
             checkout.distribution = {
                 ...plan,
-                settlement_status: ["refused", "refunded"].includes(rows[0].status) ? "not_applicable" : "not_configured"
+                split_enabled: checkout.split_payment,
+                transfers_executed: checkout.split_payment && rows[0].status === "approved" && checkout.provider_status === "approved" && !checkout.partial_refund,
+                settlement_status: !checkout.split_payment ? "disabled" : ["refused", "refunded"].includes(rows[0].status) ? "not_applicable"
+                    : checkout.needs_review ? "needs_review" : rows[0].status === "approved" ? "provider_confirmed" : "awaiting_payment"
             };
         }
         return checkout;
@@ -57,6 +63,7 @@ module.exports = {
         const payment = await getPayment(id);
         if (!payment) throw paymentError("Pagamento não encontrado.", 404);
         const conn = await connect.promise().getConnection();
+        let notify = false;
         try {
             await conn.beginTransaction();
             // Ordem de bloqueios: compra, pagamento, provedor.
@@ -85,7 +92,7 @@ module.exports = {
                 return;
             }
             const stored = { ...checkout };
-            stored.needs_review = checkout.status === "approved" && ["cancelled", "refused"].includes(shopping.status);
+            stored.needs_review = !!checkout.needs_review || checkout.status === "approved" && ["cancelled", "refused"].includes(shopping.status);
             if (checkout.status !== "pending") {
                 stored.qr_code = null;
                 stored.qr_code_base64 = null;
@@ -96,6 +103,16 @@ module.exports = {
                 [checkout.provider_order_id, checkout.provider_payment_id, checkout.provider_status, checkout.status_detail || null, JSON.stringify(stored), uuid.toBin(id)]
             );
             await conn.query("UPDATE payment SET status = ? WHERE id = ?", [checkout.status, uuid.toBin(id)]);
+            notify = current.status === "pending" && checkout.status === "approved";
+            if (checkout.provider_api === "payments" && checkout.split_payment && ["approved", "refunded"].includes(checkout.status) && !checkout.needs_review) {
+                const [splits] = await conn.query(`SELECT s.application_fee, d.plan FROM payment_split s
+                    INNER JOIN payment_distribution d ON d.id_payment = s.id_payment WHERE s.id_payment = ?`, [uuid.toBin(id)]);
+                if (!splits[0]) throw paymentError("Plano do split não encontrado para registrar a comissão.", 409);
+                const plan = typeof splits[0].plan === "string" ? JSON.parse(splits[0].plan) : splits[0].plan;
+                await conn.query(`INSERT INTO commission (id, percentage, value, id_payment) VALUES (?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE value = VALUES(value)`, [uuid.toBin(uuid.generateId()), plan.percentage,
+                    checkout.status === "refunded" ? 0 : splits[0].application_fee, uuid.toBin(id)]);
+            }
             if (checkout.status === "approved" && shopping.status === "pending") {
                 await conn.query("UPDATE shopping SET status = 'accepted' WHERE id = ?", [uuid.toBin(payment.id_shopping)]);
             }
@@ -114,5 +131,6 @@ module.exports = {
         } finally {
             conn.release();
         }
+        if (notify) await paymentNotifications.confirmed(payment);
     }
 };

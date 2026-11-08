@@ -3,6 +3,14 @@ const QRCode = require("qrcode");
 const crypto = require("crypto");
 const paymentError = require("../../utils/paymentError");
 let accountCache;
+const CARD_TYPES = ["credit_card", "debit_card", "prepaid_card"];
+
+// O provedor define o tipo do cartão pelo BIN (visa/master/elo podem ser crédito ou pré-pago).
+// Um cartão já cobrado não pode travar a conciliação por isso; Pix continua exigindo bank_transfer.
+function matchesMethod(method, type) {
+    if (method === "pix") return type === "bank_transfer";
+    return CARD_TYPES.includes(method) && CARD_TYPES.includes(type);
+}
 
 function configuration() {
     const environment = process.env.MERCADO_PAGO_ENV;
@@ -15,17 +23,25 @@ function configuration() {
 function providerFailure(error) {
     const status = error.response?.status;
     const data = error.response?.data;
-    const values = [data?.code, data?.error, ...(Array.isArray(data?.errors) ? data.errors.map(item => item.code) : [])];
+    const values = [data?.code, ...(Array.isArray(data?.cause) ? data.cause.map(item => String(item.code)) : []), data?.error,
+        ...(Array.isArray(data?.errors) ? data.errors.map(item => item.code) : [])];
     const code = values.find(value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value));
+    const missingPixKey = code === "13253" && [data?.message,
+        ...(Array.isArray(data?.cause) ? data.cause.map(item => item.description) : [])]
+        .some(message => typeof message === "string" && /^Collector user without key enabled for QR render\.?$/i.test(message.trim()));
     let failure;
 
-    if (status === 404) {
+    if ([400, 422].includes(status) && missingPixKey) {
+        failure = paymentError("Cadastre uma chave Pix na conta Mercado Pago que receberá o pagamento. No split, use a conta do vendedor.", 422);
+        failure.definitive = true;
+    } else if (status === 404) {
         failure = paymentError("Pagamento não encontrado na conta Mercado Pago atual. Confira se ele foi criado em outra conta ou no ambiente de teste. Não recrie a cobrança antes de conciliar.", 409);
     } else if (status === 402) {
         failure = paymentError("O Mercado Pago informou falha no processamento da transação. Consulte a order antes de criar outra tentativa.", 402);
     } else if ([400, 422].includes(status)) {
         failure = paymentError("O Mercado Pago rejeitou os dados ou a operação. Confira o código retornado pelo provedor.", 422);
-        failure.definitive = true;
+        failure.definitive = ["property_value", "property_type", "required_properties", "unsupported_properties", "invalid_total_amount",
+            "payment_method_not_allowed_for_collector", "2060", "2062", "2067", "2072"].includes(code);
     } else if (status === 409) {
         failure = paymentError("Operação em conflito no Mercado Pago. Consulte o pagamento antes de tentar novamente.", 409);
     } else if ([401, 403].includes(status)) {
@@ -44,7 +60,8 @@ function providerFailure(error) {
 
 async function verifyAccount() {
     const config = configuration();
-    if (accountCache?.token === config.token && accountCache.environment === config.environment && accountCache.expires > Date.now()) {
+    const clientId = process.env.MERCADO_PAGO_CLIENT_ID || "";
+    if (accountCache?.token === config.token && accountCache.clientId === clientId && accountCache.environment === config.environment && accountCache.expires > Date.now()) {
         return accountCache.account;
     }
 
@@ -62,17 +79,29 @@ async function verifyAccount() {
         throw providerFailure(error);
     }
 
-    if (!data?.id || !Array.isArray(data.tags)) {
+    if (!data?.id || typeof data.id === "number" && !Number.isSafeInteger(data.id) || !Array.isArray(data.tags)) {
         throw paymentError("Não foi possível identificar a conta do Mercado Pago.", 503);
     }
 
-    const testUser = data.tags.includes("test_user");
-    if ((config.environment === "test") !== testUser) {
-        throw paymentError("A conta Mercado Pago não corresponde a MERCADO_PAGO_ENV. Use test com usuário de teste ou production com conta real. Trocar a chave não converte pagamentos antigos.", 409);
+    let testCredential = data.tags.includes("test_user");
+    if (!testCredential) {
+        if (!/^\d{1,40}$/.test(clientId)) throw paymentError("Configure MERCADO_PAGO_CLIENT_ID para confirmar o ambiente da credencial da aplicação.", 503);
+        let application;
+        try {
+            application = (await axios({ method: "GET", url: `https://api.mercadopago.com/applications/${clientId}`,
+                timeout: 10000, maxRedirects: 0, headers: { Authorization: `Bearer ${config.token}` } })).data;
+        } catch (error) { throw providerFailure(error); }
+        if (String(application?.id) !== clientId) throw paymentError("A aplicação Mercado Pago não corresponde ao Client ID configurado.", 409);
+        testCredential = typeof application.test_access_token === "string" && application.test_access_token.length > 0 &&
+            crypto.timingSafeEqual(crypto.createHash("sha256").update(application.test_access_token).digest(),
+                crypto.createHash("sha256").update(config.token).digest());
+    }
+    if ((config.environment === "test") !== testCredential) {
+        throw paymentError("A credencial Mercado Pago não corresponde a MERCADO_PAGO_ENV. Para testar com a credencial de teste de uma conta real, configure também o Client ID da aplicação. Trocar a chave não converte pagamentos antigos.", 409);
     }
 
     const account = { id: String(data.id), environment: config.environment };
-    accountCache = { token: config.token, environment: config.environment, account, expires: Date.now() + 60000 };
+    accountCache = { token: config.token, clientId, environment: config.environment, account, expires: Date.now() + 60000 };
     return account;
 }
 
@@ -113,11 +142,20 @@ function normalizeInput(method, input, email) {
         throw paymentError("Informe um e-mail válido em payer.email.", 400);
     }
     const payer = { email: payerEmail };
-    if (payerInput.first_name !== undefined) {
-        if (typeof payerInput.first_name !== "string" || !payerInput.first_name.trim() || payerInput.first_name.length > 80) {
-            throw paymentError("Nome do pagador inválido.", 400);
+    for (const field of ["first_name", "last_name"]) {
+        if (payerInput[field] === undefined) continue;
+        if (typeof payerInput[field] !== "string" || !payerInput[field].trim() || payerInput[field].length > 80) {
+            throw paymentError("Nome ou sobrenome do pagador inválido.", 400);
         }
-        payer.first_name = payerInput.first_name.trim();
+        payer[field] = payerInput[field].trim();
+    }
+    if (payerInput.identification !== undefined) {
+        const document = payerInput.identification;
+        if (!document || !["CPF", "CNPJ"].includes(document.type) || typeof document.number !== "string" ||
+            !(document.type === "CPF" ? /^\d{11}$/ : /^\d{14}$/).test(document.number)) {
+            throw paymentError("Identificação do pagador inválida. Envie CPF/CNPJ sem pontuação.", 400);
+        }
+        payer.identification = { type: document.type, number: document.number };
     }
     const payment_method = method === "pix" ? { id: "pix", type: "bank_transfer" } : {
         id: input.payment_method_id,
@@ -152,8 +190,7 @@ async function normalizeOrder(order, payment) {
     }
     const transaction = transactions[0];
     const method = transaction.payment_method || {};
-    const expectedType = payment.method === "pix" ? "bank_transfer" : payment.method;
-    if (Number(transaction.amount) !== Number(payment.value) || method.type !== expectedType ||
+    if (Number(transaction.amount) !== Number(payment.value) || !matchesMethod(payment.method, method.type) ||
         (payment.method === "pix" && method.id !== "pix")) {
         throw paymentError("Valor ou método divergente no Mercado Pago.", 502);
     }
@@ -200,7 +237,7 @@ function validateWebhook(req) {
 }
 
 module.exports = {
-    configuration, verifyAccount, normalizeInput, normalizeOrder, validateWebhook,
+    configuration, verifyAccount, normalizeInput, normalizeOrder, validateWebhook, providerFailure, matchesMethod,
     createOrder(payment, input) {
         const amount = Number(payment.value).toFixed(2);
         return request("POST", "", {

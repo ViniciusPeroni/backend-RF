@@ -64,7 +64,7 @@ O serviço persiste a notificação, busca o registro criado e emite o evento So
 
 ### Pagamento
 
-**Depende de:** branch de pagamento criar `paymentController`/rotas e definir a fonte de confirmação (gateway, webhook ou admin).
+**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, confirma o commit e chama `paymentNotificationService.confirmed`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha na entrega não desfaz a operação. Não há outbox para repetir uma entrega interrompida.
 
 **Transição que notifica:** `payment.status` de `pending` para `approved`.
 
@@ -256,7 +256,7 @@ Se `google-auth-library` não estiver instalada, o caso de cadastro é marcado c
 
 ## Limitações
 
-- Os fluxos de pagamento, review e disputa **não existem** no backend atual; os gatilhos acima são contrato para as branches futuras.
+- O gatilho de pagamento já está integrado; os contratos de review e disputa precisam ser conferidos nas respectivas branches antes de considerar esses avisos entregues.
 - O documento de requisitos não define quem abre disputa nem quais notificações devem existir. A regra de abertura por qualquer parte é inferência a partir do RF10 e do schema; confirme com o orientador antes de implementar.
 - Recusa e estorno de pagamento não têm tipo de notificação definido; se necessário, use `sistema` e registre a decisão.
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.
