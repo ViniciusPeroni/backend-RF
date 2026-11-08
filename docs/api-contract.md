@@ -38,6 +38,13 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | shopping-product | `GET /shopping-product/` | JWT | Lista/filtra por query `shoppingId` e `productId`; controller/service não verificam ownership |
 | shopping-product | `GET /shopping-product/:id` | JWT | Consulta item por ID; controller não verifica ownership |
 | shopping-product | `GET /shopping-product/shopping/:shoppingId` | JWT | Lista itens da compra; controller não verifica ownership |
+| review | `POST /review/`, `POST /review/create` | JWT | Cria avaliação bilateral em compra `completed`; uma por autor/compra (UNIQUE), duplicata retorna 409; avisa somente `id_reviewed` com `nova_review` |
+| review | `GET /review/`, `GET /review/:id` | Público | Consulta avaliações; não envia notificação |
+| review | `PUT/DELETE /review/:id` | JWT | Autor ou admin; editar/excluir não envia `nova_review` |
+| dispute | `POST /dispute/`, `POST /dispute/create` | JWT | Comprador ou vendedor abre disputa; duplicata ativa do mesmo autor/compra retorna 409; avisa demais partes e admins ativos com `disputa_aberta` |
+| dispute | `GET /dispute/`, `GET /dispute/:id` | JWT | Admin ou participantes da compra conforme service |
+| dispute | `PUT /dispute/:id` | JWT | Autor edita type/description enquanto `aberta`; admin também pode definir `aberta`/`em_analise`; sem novo aviso; estado alterado concorrentemente pode retornar 409 |
+| dispute | `PATCH /dispute/:id/resolve`, `PATCH /dispute/:id/reject` | JWT + admin | Recebe `resolution`; finaliza `aberta` ou `em_analise`, avisa todas as partes com `disputa_resolvida`; repetição/conflito entre finalizações retorna 409 |
 | card | `POST /card/create` | JWT | Cadastra cartão tokenizado do próprio usuário; `payment_token` é gravado e nunca retornado; JWT de usuário removido responde 401 |
 | card | `GET /card/` | JWT | Lista somente os cartões de `req.userId`; token não é exposto |
 | card | `GET /card/:id` | JWT | Detalhe do próprio cartão; cartão de outro usuário responde 404 |
@@ -49,6 +56,8 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | localization | `PUT /localization/:id` | JWT | Atualiza campos da própria localização; valida o estado final; `latitude`/`longitude` são opcionais e `null` limpa a coordenada |
 | localization | `DELETE /localization/:id` | JWT | Exclui a própria localização; se vinculada a anúncio (FK RESTRICT) responde 409 |
 | localization | `GET /localization/product/:productId` | Token opcional | Visão pública do anúncio (RN10): sem reserva aceita devolve apenas `city`/`neighborhood` com `latitude`/`longitude` arredondadas (2 casas); dono ou comprador com shopping `accepted`/`completed` recebe `street`/`number`/`zipCode`/`state` e coordenadas exatas |
+| localization | `GET /localization/companies` | JWT | Empresas ativas com endereço geocodificado para o mapa: nome, bairro/cidade, coordenadas arredondadas (2 casas), categorias e total de anúncios disponíveis; sem rua/número/CEP |
+| commission | `POST /commission/payment/:paymentId` | JWT + admin + limitador global | Gera comissão de 8% sobre pagamento aprovado; repetição retorna comissão existente |
 | log | `POST/GET /log/`, `GET/PUT/DELETE /log/:id` | Sem JWT explícito | CRUD montado sem controle de acesso na rota |
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
 | document | `GET /document/:id/decrypt`, `DELETE /document/:id` | JWT + admin | Descriptografar/excluir documento |
@@ -83,7 +92,25 @@ Eventos de notificação não são reproduzidos automaticamente após reconectar
 
 - Compras e itens de compra têm rotas REST. Pagamentos têm módulo próprio integrado ao Mercado Pago: [payments.md](payments.md); isso não implica negociação completa ou implementação de todos os fluxos do schema.
 - Cartões têm CRUD autenticado e restrito ao dono. O `payment_token` armazenado não é devolvido pela API; pagamentos avulsos usam token do SDK sem vincular um cartão salvo automaticamente.
-- Disputa, avaliação, impacto ambiental e conversa têm rotas montadas em `/dispute`, `/review`, `/environmental-impact` e `/conversation`; confirme os contratos nos respectivos controllers antes de integrar os clientes.
-- Gatilhos automáticos existentes incluem `nova_mensagem`, notificações `sistema` no cadastro/ativação OTP e cancelamento de compra, `reserva_solicitada` na criação de compra e `reserva_aceita`/`reserva_recusada` no aceite/recusa. Pagamento confirmado também notifica comprador, vendedores e administradores ativos após a transição real para aprovado. Review e disputa devem confirmar seus gatilhos conforme [`notification-integration.md`](notification-integration.md).
-- Log não tem JWT explícito nas rotas atuais. Todas as rotas de `localization` agora exigem JWT (inclusive o POST, com `userId` restrito ao token); a única rota pública é `GET /localization/product/:productId` com token opcional. Rotas shopping-product têm JWT, mas não verificam ownership no controller atual. `PUT`/`DELETE /product/:id` restringem a mutação ao dono via `id_user`; as rotas de foto ainda não verificam propriedade.
+- Review e disputa têm rotas e notificações integradas. Impacto ambiental e conversa têm rotas montadas em `/environmental-impact` e `/conversation`; confirme os contratos nos respectivos controllers antes de integrar os clientes.
+- Gatilhos automáticos existentes incluem `nova_mensagem`, notificações `sistema` no cadastro/ativação OTP e cancelamento de compra, `reserva_solicitada` na criação de compra, `reserva_aceita`/`reserva_recusada` no aceite/recusa, `nova_review`, `disputa_aberta`/`disputa_resolvida` e pagamento confirmado (comprador, vendedores e administradores ativos) após a transição real para aprovado. Destinatários, concorrência e limites estão em [`notification-integration.md`](notification-integration.md).
+- Log não tem JWT explícito nas rotas atuais. Todas as rotas de `localization` exigem JWT (inclusive o POST, com `userId` restrito ao token), exceto `GET /localization/product/:productId` com token opcional. `GET /localization/companies` lista empresas ativas para o mapa com coordenadas arredondadas. Rotas shopping-product têm JWT e autorização por comprador dono/admin aplicada no service. `PUT`/`DELETE /product/:id` restringem a mutação ao dono via `id_user`; as rotas de foto ainda não verificam propriedade.
 - Para alterar contrato, confirme regra no controller/service/schema, atualize este snapshot somente com comportamento verificado e comunique o impacto ao cliente. Consulte [`security-privacy.md`](security-privacy.md).
+
+## Atualização do comprador — 03/11/2026
+
+GET `/user/:id/photo` é leitura binária autenticada exclusiva do titular/admin, com 204 sem foto e raster com MIME identificado; PUT do perfil valida raster e 5 MB. Itens de compra aplicam escopo do comprador/admin, UUID de filtro inválido retorna 400 e item alheio retorna 404. Listagem de conversas teve o alias SQL corrigido. Contrato, limitações e evidências em `buyer-fixes-2026-11-03.md`.
+
+## Google — 03/11/2026
+
+O fluxo Google passou a usar `googleLoginService.js`, separado do helper LinkedIn: transação, vínculo sem sobrescrever outro google_id, conservação de papel/firstLogin, bloqueio de inactive e verificação de autoridade do Google ao vincular e-mail local. Controller mantém verifyIdToken/audience e separa 400/401/403/409/500/503. A ativação depende do GOOGLE_CLIENT_ID real, ausente no ambiente observado. `node tests/google-login.integration.js` passou contra banco descartável com verificador Google simulado e limiter isolado somente no teste. Não comprova OAuth real. Não foram alterados LinkedIn nem pagamento por cartão. Configuração externa e teste real pendentes do acesso do proprietário ao Google Cloud; guia detalhado em FrontEnd-RF/docs/google-login-setup.md. Nenhum commit/push nesta etapa.
+
+O usuário forneceu o Client ID público e GOOGLE_CLIENT_ID foi configurado no .env local ignorado pelo Git. API reiniciada, verificação inválida retorna 401 e não configuração ausente. Após configuração das origens e correção do meta referrer no web, a última verificação do SDK oficial no localhost:5174 recebeu HTTP 200 no botão, sem rejeição de origem. Login completo com conta real continua sem validação confirmada. Nenhuma credencial real foi usada em teste automatizado.
+
+O usuário autorizou consolidar as alterações na main dos dois projetos. Esta autorização de Git não inclui LinkedIn nem pagamento por cartão. Arquivos de ambiente e testes locais ignorados ficam fora do commit.
+
+## Sincronização da main — 03/11/2026
+
+Integrados 28 commits remotos até `a19eb94`, incluindo Docker, reviews, disputas, impacto ambiental, notificações de review/disputa e checkout/commission da equipe. Conflitos restritos a AGENTS e documentos de contrato/segurança, resolvidos preservando a autorização local de shopping-product e as capacidades novas. Nenhum desenvolvimento adicional de LinkedIn ou pagamento por cartão.
+
+Verificação após integração: 47 testes em `test/*.test.js` e `tests/buyer-read-access.test.js` passaram; integração Google em MySQL descartável passou com verificador do provedor simulado; sintaxe de 28 arquivos JS conferida. Não comprova entrega real de pagamento, Docker, notificações novas ou autenticação Google real. Inspeção somente de metadados do banco local confirmou ausência de `payment.mp_preference_id` e `payment.mp_payment_id`: migrações Mercado Pago não aplicadas nesta sincronização. Não executar o schema destrutivo no banco existente.

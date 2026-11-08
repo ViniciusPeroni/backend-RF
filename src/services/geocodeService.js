@@ -33,6 +33,10 @@ async function searchAddress(params) {
 }
 
 async function geocodeAddress({ street, number, city, state }) {
+    // Testes não chamam serviços externos (mesma regra do Mercado Pago nas
+    // suítes): endereço fictício não vai para o OpenStreetMap.
+    if (process.env.NODE_ENV === 'test') return null;
+
     // Da busca mais precisa para a mais ampla. O CEP não entra porque a base
     // do OpenStreetMap tem poucos CEPs brasileiros e ele derrubava a busca.
     const attempts = [

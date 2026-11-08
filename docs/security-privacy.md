@@ -18,11 +18,13 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 - Mutação de produto exige JWT; `PUT`/`DELETE /product/:id` restringem ao dono via `id_user`, mas as rotas de foto (`POST/PUT/DELETE .../photos`) ainda não verificam propriedade.
 - Compras: criação, listagem, detalhe e cancelamento têm escopo de comprador/admin conforme controller/service. `PATCH /shopping/:id/status` valida papel/propriedade: admin pode qualquer status válido; vendedor único dos itens pode apenas `accepted`/`refused`; compras multi-vendedor ficam restritas ao admin.
 - O cancelamento local da compra não cancela a cobrança externa. A integração de pagamentos deve usar suas rotas próprias de cancelamento/reembolso e manter a sinalização de conciliação quando houver aprovação após cancelamento local.
-- Consultas `shopping-product` exigem JWT, porém não verificam ownership da compra/item nos controllers atuais; avaliar exposição entre usuários.
+- Consultas `shopping-product` exigem JWT e aplicam escopo da compra (`s.id_user`) para não administradores, alinhado ao detalhe de shopping. Item alheio responde 404; listas são filtradas e UUID inválido não remove o filtro.
 - Cartões (`/card/*`) exigem JWT e são sempre filtrados por `req.userId` no service: cartão de outro usuário responde 404. O `payment_token` do gateway é gravado, nunca selecionado nas consultas e nunca retornado; a API não recebe número completo nem CVV. Excluir o cartão não apaga pagamentos (a FK usa `ON DELETE SET NULL`).
 - Rotas de documentos que recebem `userId` ou ID de registro precisam conferir vínculo com `req.userId`. Na implementação documentada, criação/listagem/metadados não garantem ownership; descriptografia e exclusão exigem admin.
 - OTP enviar/verificar não exigem JWT na rota e recebem identificador no body; considere abuso, enumeração e limites ao alterar esse fluxo.
 - `userRoutes.js` aplica middlewares em ordem posicional; inserir rota no bloco errado pode expô-la ou restringi-la indevidamente.
+- Reviews: criação exige JWT e vínculo comprador/vendedor em compra concluída; edição/exclusão exigem autor ou admin. Consultas são públicas. O aviso inclui somente a nota, nunca o comentário livre.
+- Disputas: abertura exige participação; apenas admin usa resolve/reject. Abertura avisa partes exceto autor e admins ativos; finalização avisa todas as partes (admins externos não recebem). Descrição e resolução não entram em notificações.
 
 ## Socket.IO
 
@@ -36,6 +38,7 @@ O backend é a fronteira de validação e autorização para web/mobile. JWT vá
 
 - O POST de notificação aceita somente objeto JSON, título textual não vazio e campos opcionais com tipos validados; `content` respeita a capacidade TEXT (65.535 bytes UTF-8). Destinatário é sempre o token, nunca `id_user` do body.
 - Os gatilhos de reserva usam a mudança de status apurada sob lock transacional para evitar duplicidade em aceites concorrentes. Cancelamento revalida `pending` sob o mesmo lock; recusa/cancelamento não repõem estoque duas vezes.
+- Reviews repetidas são bloqueadas pela UNIQUE; disputas ativas do mesmo autor são verificadas sob lock da compra. Resolver/rejeitar disputa usa lock do registro e rejeita finalização repetida com 409. Edição comum condiciona o UPDATE ao estado permitido, evitando reabertura por uma leitura obsoleta. Essas proteções não significam idempotência global por chave de requisição.
 - O serviço de notificação não oferece deduplicação genérica nem entrega garantida após falha do processo; futuros fluxos devem implementar suas transições idempotentes e não tratar uma consulta prévia fora da transação como proteção suficiente.
 
 ## Configuração e riscos operacionais

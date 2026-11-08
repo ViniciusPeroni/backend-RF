@@ -20,7 +20,7 @@ Não crie contrato porque existe tabela no schema ou porque um cliente parece es
 - `send_message` aceita `{ conversationId, type?, content?, id_answer? }`; a confirmação chega pelo callback e mensagens chegam como `new_message`.
 - Notificações persistidas são emitidas como `notification`; leitura/exclusão sincronizam com `notification_read`, `notifications_read_all` e `notification_deleted`.
 - Depois de reconectar, consulte `GET /notification/` (opcionalmente `?read=nao`): não há replay automático de eventos perdidos enquanto offline.
-- Gatilhos automáticos atuais: mensagem nova, cadastro, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador), cancelamento (`sistema` para cada vendedor) e pagamento confirmado para comprador, vendedores e administradores ativos. Review e disputa devem confirmar seus gatilhos; o contrato está em [`notification-integration.md`](notification-integration.md).
+- Gatilhos automáticos atuais: mensagem nova, cadastro, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador), cancelamento (`sistema` para cada vendedor), review (`nova_review` para avaliado), disputa aberta (demais partes e admins ativos) e resolvida/rejeitada (todas as partes) e pagamento confirmado para comprador, vendedores e administradores ativos; o contrato está em [`notification-integration.md`](notification-integration.md).
 - Teste de integração: `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification` (MySQL de desenvolvimento; remove dados sintéticos ao final).
 - `join_conversation` exige identidade autenticada, UUID válido e participação na conversa.
 

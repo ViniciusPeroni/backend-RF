@@ -40,6 +40,7 @@ router.use(verifyJWT);
 // ======================================================
 router.put("/:id", upload.single("photo"), userController.updateUser);
 router.delete("/:id", userController.deleteUser);
+router.get("/:id/photo", userController.getUserPhoto);
 router.get("/:id", userController.getUserById);
 router.patch("/password", userController.patchPassword);
 router.patch("/password/first-access", userController.firstAccessPassword);

@@ -10,6 +10,7 @@ Este repositório contém a API do Reaproveita Franca. Web e mobile são aplica�
 - `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets e escuta em `PORT` ou `5000`.
 - `src/index.js` carrega ambiente, cria parsers e rotas, chama o teste de conexão MySQL e monta `/api/reaproveitafranca`.
 - `src/index.js` tenta `dotenv-safe` e captura falhas para recorrer a `dotenv`. Não assuma validação fatal sem conferir o boot real.
+- Integração Mercado Pago usa as variáveis `MERCADO_PAGO_*` e `PAYMENT_*` descritas em [payments.md](payments.md) e [payment-split.md](payment-split.md).
 
 Fluxo REST mais comum:
 
@@ -41,7 +42,7 @@ src/
 ## Banco e IDs
 
 - Schema base: `src/mysql-init/RFScript.sql`; começa removendo e recriando `Reaproveita_Franca`. Não executar em banco com dados importantes.
-- `src/mysql-init/migration_social_login.sql` é uma migração SQL manual/aditiva. Não há ORM nem framework de migrations.
+- `src/mysql-init/migration_social_login.sql`, `migration_mercado_pago.sql` e `migration_mercado_pago_payment_id.sql` são migrações SQL manuais/aditivas. Não há ORM nem framework de migrations; aplique cada migration uma vez e na ordem indicada em banco existente.
 - UUIDv7 é exposto como string e armazenado como `BINARY(16)`. Use `src/utils/uuid.js` na fronteira e `BIN_TO_UUID()` nas leituras; confira os módulos existentes antes de alterar padrão.
 - Use crases para identificadores reservados como `user`, `table` e `read`.
 - O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.
@@ -54,6 +55,10 @@ src/
 `join_conversation` exige autenticação, UUID válido e participação em `conversation_participant`. Cadastro e ativação por OTP também geram notificações `sistema`; a criação de compra gera `reserva_solicitada` para cada vendedor, o aceite/recusa gera `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento gera `sistema` para cada vendedor. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
 
 `shoppingService.updateStatus(id, newStatus, { onlyPending = false } = {})` lê o status sob `SELECT ... FOR UPDATE`, aplica as restrições e retorna `{ shopping, previousStatus, changed }`. A compra retornada é lida na mesma conexão/transação antes do commit. Os controllers preservam a resposta HTTP e só notificam se `changed`; `/cancel` também valida `pending` sob o lock. Falhas de notificação não desfazem a transição já confirmada. Não há outbox/fila/retry persistente: uma queda entre commit e aviso pode deixar de produzir a notificação.
+
+`reviewController.createReview` avisa o avaliado após o INSERT; a UNIQUE por compra/autor impede duplicatas simultâneas. Edição não notifica. `disputeService.createDispute` bloqueia a compra em uma conexão transacional antes de conferir disputa ativa do mesmo autor e inserir. Resolver/rejeitar compartilham uma finalização que bloqueia a disputa, impede estados finais repetidos e devolve o snapshot antes do commit. A edição comum usa uma condição de status no UPDATE para não desfazer finalização concorrente. Os formatos de retorno dos services de review/disputa permanecem iguais.
+
+`disputeService.getNotificationRecipients(shoppingId, { includeAdmins = false } = {})` busca comprador/vendedores e, na abertura, admins ativos. O controller deduplica IDs, exclui o autor apenas na abertura e trata cada falha de aviso separadamente. O serviço central `notifyUser` continua responsável por persistir e emitir o evento. A falha ao consultar destinatários também não desfaz a operação já confirmada.
 
 ## Riscos de compatibilidade
 

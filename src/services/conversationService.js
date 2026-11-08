@@ -142,7 +142,7 @@ async function listConversationsForUser(userId) {
             c.created_in,
             c.updated_in,
             BIN_TO_UUID(c.id_last_message) AS id_last_message,
-            BIN_TO_UUID(other.id_user) AS otherUserId,
+            BIN_TO_UUID(otherCp.id_user) AS otherUserId,
             otherUser.name AS otherUserName,
             otherUser.photo AS otherUserPhoto,
             otherUser.role AS otherUserRole,

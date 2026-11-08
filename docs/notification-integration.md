@@ -1,6 +1,6 @@
 # Integração de notificações entre fluxos
 
-Este documento define como os demais fluxos do backend devem disparar notificações usando a infraestrutura já existente. Ele **não implementa** pagamento, avaliação ou disputa; apenas fixa o contrato para que as branches responsáveis por esses domínios chamem o serviço de forma consistente.
+Este documento descreve os gatilhos implementados, seus destinatários e os limites da infraestrutura de notificações. Review e disputa já estão integrados; pagamento permanece como contrato futuro até existir seu fluxo de domínio.
 
 ## Escopo
 
@@ -59,8 +59,11 @@ O serviço persiste a notificação, busca o registro criado e emite o evento So
 | Compra criada | `src/controllers/shoppingController.js` | `POST /shopping/create` | `reserva_solicitada` por vendedor |
 | Compra aceita/recusada | `src/controllers/shoppingController.js` | `PATCH /shopping/:id/status` | `reserva_aceita` / `reserva_recusada` |
 | Compra cancelada | `src/controllers/shoppingController.js` | `/cancel` ou admin em `/status` | `sistema` para cada vendedor |
+| Avaliação criada | `src/controllers/reviewController.js` | `POST /review/` ou `/review/create` | `nova_review` para o avaliado |
+| Disputa aberta | `src/controllers/disputeController.js` | `POST /dispute/` ou `/dispute/create` | `disputa_aberta` para demais partes e admins ativos |
+| Disputa finalizada | `src/controllers/disputeController.js` | `PATCH /dispute/:id/resolve` ou `/reject` | `disputa_resolvida` para todas as partes |
 
-## Integrações futuras (bloqueadas por outras branches)
+## Detalhamento por domínio
 
 ### Pagamento
 
@@ -115,7 +118,7 @@ Cuidados:
 
 ### Avaliação
 
-**Depende de:** branch de avaliação criar `reviewController`/rotas.
+**Implementado:** `reviewController.createReview` chama `notifyUser` depois de o service confirmar o INSERT. As duas rotas de criação usam esse mesmo handler. A resposta HTTP continua `{ message, id }`.
 
 **Decisão:** avaliação **bilateral**. O comprador avalia o vendedor e o vendedor avalia o comprador. Base: RN23 do documento de requisitos ("cada participante poderá avaliar a outra parte uma única vez por negociação").
 
@@ -144,11 +147,11 @@ try {
 }
 ```
 
-Como o fluxo é bilateral, em uma compra concluída cada lado recebe no máximo uma `nova_review`, e o autor não recebe a própria avaliação. O comentário livre **não** deve ir para o `content`.
+Cada INSERT de review confirmado gera uma `nova_review` para o avaliado, nunca para o autor. A UNIQUE por compra/autor impede repetir ou duplicar simultaneamente a mesma avaliação; editar/excluir não envia novo aviso. Como a API permite excluir uma avaliação, a UNIQUE não impede uma nova criação depois da exclusão. O comentário livre **não** vai para o `content`.
 
 ### Disputa
 
-**Depende de:** branch de disputa criar `disputeController`/rotas.
+**Implementado:** `disputeController` chama o serviço de notificações depois de a abertura/finalização ser confirmada. `disputeService.getNotificationRecipients` obtém comprador e vendedores (mais admins ativos apenas na abertura). UUIDs são deduplicados e o autor é excluído somente de `disputa_aberta`.
 
 A tabela `dispute` já existe: `type`, `description`, `status`, `resolution`, `created_in`, `updated_in`, `resolved_in`, `id_shopping`, `id_resolved_by`, `id_opened_by`. Ela corresponde ao RF10 ("Gerenciamento de Negociações") do documento de requisitos.
 
@@ -160,7 +163,9 @@ A tabela `dispute` já existe: `type`, `description`, `status`, `resolution`, `c
 |---|---|---|
 | criação com status `aberta` | `disputa_aberta` | demais partes da compra (não quem abriu) e administradores ativos |
 | `aberta` → `em_analise` | nenhuma | — |
-| `em_analise` → `resolvida` ou `rejeitada` | `disputa_resolvida` | todas as partes da compra, incluindo quem abriu |
+| `aberta` ou `em_analise` → `resolvida` ou `rejeitada` | `disputa_resolvida` | todas as partes da compra, incluindo quem abriu; admin externo não recebe |
+
+A finalização diretamente de `aberta` já era permitida pelos services atuais e foi preservada; `em_analise` não virou uma etapa obrigatória. Editar descrição/tipo ou passar para `em_analise` não envia aviso.
 
 Ao abrir:
 
@@ -206,6 +211,8 @@ Cuidados:
 - `resolution` e `description` podem conter dados sensíveis; não copie o texto para o `content`;
 - notifique apenas na transição real de status, não em cada `UPDATE`;
 - em compra com vários vendedores, cada parte recebe uma notificação.
+- um vendedor com vários itens ou que também seja admin recebe só um aviso por evento;
+- falha ao consultar destinatários ou enviar aviso não desfaz a disputa; falha individual não impede tentar avisar os demais.
 
 ## Origem das decisões de destinatário
 
@@ -230,6 +237,8 @@ const connect = require('../db/connect');
 - Repetir a mesma ação não deve criar outra notificação.
 - Aceite repetido permanece 200 sem novo aviso; recusa/cancelamento em compra finalizada permanecem 400. `/cancel` revalida `pending` dentro da transação. Recusa/cancelamento restauram estoque somente uma vez.
 - Webhooks de pagamento devem ser idempotentes; registre o identificador do evento ou verifique o status anterior antes de notificar.
+- Criação de review depende da UNIQUE existente. Abertura de disputa serializa a verificação/inserção por compra em uma transação; uma disputa ativa do mesmo autor/compra retorna 409. Resolver/rejeitar usa lock da disputa e snapshot na conexão transacional: só a primeira finalização tem sucesso, as demais retornam 409 sem aviso.
+- A edição comum condiciona seu UPDATE ao status permitido para não reabrir uma disputa finalizada nem editar como autor depois de entrar em análise por uma operação concorrente. Esses conflitos retornam 409.
 - Não emita o evento `notification` manualmente: `notifyUser` já faz isso.
 
 ## Verificação
@@ -246,6 +255,7 @@ O script `tests/notification.integration.js`:
 - cria usuários, produtos, conversa e compras sintéticas;
 - testa CRUD de notificações, ownership, filtros, contagem, read-all, exclusão e eventos Socket.IO;
 - testa cadastro, OTP, nova mensagem e os gatilhos de compra/reserva;
+- chama `tests/helpers/reviewDisputeNotifications.js` para exercitar criação bilateral de review, disputa aberta/resolvida/rejeitada, destinatários, falhas de aviso/consulta, concorrência e entrega Socket.IO real;
 - rejeita payloads com tipos inválidos e conteúdo acima de 65.535 bytes UTF-8 antes de chegar ao MySQL;
 - força leituras concorrentes de reservas e testa aviso único, estoque e cancelamento com leitura desatualizada;
 - conecta clientes WebSocket ao Socket.IO real para testar `notification`, `notification_read`, `notifications_read_all` e `notification_deleted` em duas sessões do dono, sem entrega a outro usuário, anônimo ou JWT inválido/já expirado;
@@ -254,10 +264,12 @@ O script `tests/notification.integration.js`:
 
 Se `google-auth-library` não estiver instalada, o caso de cadastro é marcado como `SKIP` e o restante da suíte continua. Rode `npm install` para executar a cobertura completa.
 
+Os casos de disputa recusam banco que já tenha admins ativos antes de criar suas próprias fixtures, pois o comportamento real notificaria essas pessoas. Use banco descartável; a limpeza remove reviews/disputas por UUID de compra antes de excluir compras e usuários sintéticos.
+
 ## Limitações
 
-- O gatilho de pagamento já está integrado; os contratos de review e disputa precisam ser conferidos nas respectivas branches antes de considerar esses avisos entregues.
-- O documento de requisitos não define quem abre disputa nem quais notificações devem existir. A regra de abertura por qualquer parte é inferência a partir do RF10 e do schema; confirme com o orientador antes de implementar.
+- O gatilho de pagamento (`pagamento_confirmado`) já está integrado pelo módulo de pagamentos com split; review/disputa já têm API e integração de avisos.
+- O documento de requisitos não define explicitamente os destinatários de notificações. A abertura por qualquer parte, originalmente inferida do RF10/schema, é o comportamento dos services que chegaram à main; esta integração não amplia suas permissões.
 - Recusa e estorno de pagamento não têm tipo de notificação definido; se necessário, use `sistema` e registre a decisão.
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.
 - `join_conversation` agora valida identidade, UUID e participação; versões anteriores destes guias descreviam a implementação antiga.

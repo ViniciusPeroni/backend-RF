@@ -29,6 +29,7 @@
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
 - Há teste específico de pagamentos em `scripts/test-payment-integration.js`, com MySQL real e transporte externo interceptado; exige `RUN_PAYMENT_DB_TESTS=1`, nunca produção. Não há suíte geral, lint, typecheck ou build. Use `node --check` para sintaxe; configuração e cURLs em `docs/payments.md`.
 - Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- No merge da `main` de 07/11/2026, Bryan escolheu manter este módulo de pagamentos (Pix/cartão com split, variáveis `MERCADO_PAGO_*`). O Checkout Pro da `main` (`MP_*`, `mercadoPagoService`, `paymentWebhookService` e seus testes) ficou fora.
 
 ## Fluxo de trabalho do agente
 
@@ -44,11 +45,12 @@
 - `src/server.js` cria HTTP/Socket.IO; `src/index.js` configura Express e monta rotas; módulos em `src/routes/modules/` encaminham para controllers.
 - `userController.js` acessa o pool diretamente em vários fluxos; `src/services/userServices.js` e `src/middlewares/verifyUuid.js` são helpers legados não utilizados.
 - `notificationSocket.js` valida o JWT para associar sockets à sala individual; `send_message` e `join_conversation` exigem identidade autenticada e participação na conversa. A validação do JWT para ingresso ocorre na conexão; não há desconexão automática quando o token expira depois dela.
-- Notificações automáticas atuais: mensagem nova, cadastro de conta, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador), cancelamento (`sistema` para cada vendedor) e confirmação de pagamento (comprador, vendedores e administradores ativos). Review e disputa devem confirmar seus gatilhos nos respectivos fluxos.
-- Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` não verificam ownership nos controllers atuais.
+- Notificações automáticas atuais: mensagem nova, cadastro de conta, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador), cancelamento (`sistema` para cada vendedor), criação de review (`nova_review` para o avaliado), abertura/finalização de disputa (`disputa_aberta`/`disputa_resolvida`) e confirmação de pagamento (comprador, vendedores e administradores ativos).
+- Disputa aberta avisa demais partes e admins ativos; quem abriu não recebe esse aviso. Resolver/rejeitar avisa todas as partes, inclusive quem abriu, sem admins externos à compra. Destinatários são deduplicados e texto livre não vai ao aviso. Abertura bloqueia a compra; finalização bloqueia a disputa. Edição comum usa guarda de status para não reabrir um estado final concorrente.
+- Compras estão implementadas em `/shopping/*`; `PATCH /shopping/:id/status` permite qualquer status ao admin e apenas `accepted`/`refused` ao vendedor único dos itens. Comprador não usa essa rota; o cancelamento do comprador ocorre em `PATCH /shopping/:id/cancel`. Consultas `/shopping-product/*` aplicam escopo do comprador dono/admin no service; consultas individuais de outra conta retornam 404.
 - `shoppingService.updateStatus` retorna `{ shopping, previousStatus, changed }`, decididos sob lock transacional. Controllers notificam apenas quando `changed`; `/cancel` exige `onlyPending` dentro da transação. Esses metadados não fazem parte da resposta HTTP.
-- `npm run test:notification` cobre MySQL/HTTP e transporte Socket.IO real (WebSocket nativo; Node.js 22+). O teste não exercita SMTP/OAuth reais, carga nem clientes web/mobile.
-- Bryan não autorizou correções próprias no módulo de compras durante o trabalho de pagamentos. As alterações de compras recebidas da `main` foram incorporadas no merge solicitado em 29/10/2026; preserve-as e peça autorização antes de novas mudanças fora de pagamentos.
+- `npm run test:notification` cobre MySQL/HTTP e transporte Socket.IO real (WebSocket nativo; Node.js 22+), inclusive review/disputa. Para evitar avisos sintéticos a pessoas reais, os casos de disputa recusam banco que já possua admins ativos antes das fixtures. O teste não exercita SMTP/OAuth reais, carga nem clientes web/mobile.
+- Bryan não autorizou correções próprias no módulo de compras durante o trabalho de pagamentos. As alterações de compras recebidas da `main` foram incorporadas nos merges solicitados; preserve-as e peça autorização antes de novas mudanças fora de pagamentos.
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testconnect`, com a mesma caixa do arquivo, e confia apenas no proxy local. O túnel deve encaminhar para `http://127.0.0.1:5000` (ou `PORT`), sem depender do IP do Wi-Fi.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
@@ -56,8 +58,8 @@
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migração aditiva social: `src/mysql-init/migration_social_login.sql`. Não há framework de migração.
-- Na integração da `main` em 29/10/2026, o banco local ainda não tinha `localization.latitude`/`longitude` e exigia `user.password`/`cellphone`, enquanto o schema versionado permite NULL nesses dois campos. O merge não altera esse banco. Reconfirme o schema antes da integração mobile; as suítes recebidas da main foram validadas em banco temporário com o schema versionado.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, as de pagamento (`migration_payment_*.sql`) e `migration_localization_coordinates.sql`. `migration_mercado_pago*.sql` vieram com o Checkout Pro da `main`, que não é usado nesta branch. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
+- Em 07/11/2026 o banco local recebeu `localization.latitude`/`longitude` pela migração de coordenadas. Reconfirme o schema antes da integração mobile.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
 - JWT tem duração documentada de 8h; `verifyJWT` aceita Bearer ou token cru e define `req.userId`, `req.role`, `req.userName`.
