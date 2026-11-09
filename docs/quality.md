@@ -2,7 +2,16 @@
 
 ## Estado das ferramentas
 
-O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto), `npm run test:notification` e `npm run test:card`. Os dois scripts são integrações com MySQL, não uma suíte completa de testes. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro. Não invente outros comandos de teste como `npm test`.
+O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto), `npm run test:notification`, `npm run test:card` e `npm run test:localization`. Os três scripts são integrações com MySQL, não uma suíte completa de testes. Há também um teste específico de pagamentos em `scripts/test-payment-integration.js`. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro. Não invente outros comandos de teste como `npm test`.
+
+No PowerShell, somente em banco de desenvolvimento:
+
+```powershell
+$env:RUN_PAYMENT_DB_TESTS='1'
+node scripts/test-payment-suite.js
+```
+
+O runner de pagamentos cria um banco temporário vazio com as tabelas do schema versionado, executa pagamentos, cartões, localização e notificações e remove esse banco ao final. Não executa DROP/USE do RFScript.sql no banco existente. O teste específico de pagamentos aplica somente migrações aditivas e cria fixtures exclusivas. Usa HTTP/MySQL reais e intercepta chamadas financeiras e OAuth ao Mercado Pago; não valida o split externo nem movimenta dinheiro. É bloqueado com `NODE_ENV=production`.
 
 O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em caso de erro, usa `dotenv`. Portanto, não assuma que a ausência/incompletude de `.env` sempre interrompe o boot; confira o comportamento no ambiente em questão. A conectividade MySQL é verificada, mas uma falha é registrada sem necessariamente impedir a inicialização.
 
@@ -26,6 +35,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
 - para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento e Node.js 22+ com WebSocket nativo. Cobre validação, ownership, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
 - para cartões, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:card`. Também cria e remove usuários sintéticos e cobre validação, ownership e não exposição de `payment_token`.
+- para localização, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:localization`. Cria e remove dados sintéticos e cobre CRUD do dono, coordenadas e mascaramento do endereço do anúncio.
 
 ### Socket.IO e provedores externos
 
@@ -48,4 +58,4 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 
 ## Relato de qualidade
 
-Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. “Não há suíte automatizada completa” deve continuar explícito; o script de notificação é uma cobertura parcial e versionada. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade e [`notification-integration.md`](notification-integration.md) para o contrato dos gatilhos.
+Inclua comando exato, ambiente relevante sem segredos, resultado observado e cenários não cobertos. Não há suíte automatizada completa; os testes de pagamento, notificação, cartão e localização são coberturas parciais e versionadas. Consulte [`feature-readiness.md`](feature-readiness.md) para classificar a prontidão da funcionalidade e [`notification-integration.md`](notification-integration.md) para o contrato dos gatilhos.

@@ -11,6 +11,9 @@ router.get("/product/:productId", optionalJWT, localizationController.getProduct
 
 router.use(verifyJWT);
 
+// Antes de "/:id" para "companies" não ser lido como ID.
+router.get("/companies", localizationController.getCompaniesForMap);
+
 // POST exige JWT e o controller recusa userId divergente de req.userId (403).
 router.post("/", validateLocalization, localizationController.createLocalization);
 router.get("/", localizationController.getLocalizations);

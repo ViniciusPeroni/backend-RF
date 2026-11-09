@@ -18,6 +18,7 @@ class AppController {
   }
 
   middlewares() {
+    this.express.set("trust proxy", "loopback");
     // Permite que a applicação receba dados em formato JSON nas requisições
     this.express.use(express.json());
     this.express.use(express.urlencoded({ extended: true })); // Necessário para receber dados de formulários HTML

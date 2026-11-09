@@ -67,7 +67,7 @@ O serviço persiste a notificação, busca o registro criado e emite o evento So
 
 ### Pagamento
 
-**Depende de:** branch de pagamento criar `paymentController`/rotas e definir a fonte de confirmação (gateway, webhook ou admin).
+**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, confirma o commit e chama `paymentNotificationService.confirmed`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha na entrega não desfaz a operação. Não há outbox para repetir uma entrega interrompida.
 
 **Transição que notifica:** `payment.status` de `pending` para `approved`.
 
@@ -268,7 +268,7 @@ Os casos de disputa recusam banco que já tenha admins ativos antes de criar sua
 
 ## Limitações
 
-- `pagamento_confirmado` é o único tipo do ENUM sem gatilho de domínio: Payment ainda não existe. Review/disputa já têm API e integração de avisos.
+- O gatilho de pagamento (`pagamento_confirmado`) já está integrado pelo módulo de pagamentos com split; review/disputa já têm API e integração de avisos.
 - O documento de requisitos não define explicitamente os destinatários de notificações. A abertura por qualquer parte, originalmente inferida do RF10/schema, é o comportamento dos services que chegaram à main; esta integração não amplia suas permissões.
 - Recusa e estorno de pagamento não têm tipo de notificação definido; se necessário, use `sistema` e registre a decisão.
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.

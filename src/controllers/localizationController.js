@@ -245,7 +245,25 @@ const getProductLocation = async (req, res) => {
 };
 
 
+// Empresas para o mapa: coordenadas aproximadas, sem endereço completo.
+const getCompaniesForMap = async (req, res) => {
+    try {
+        const companies = await loc.getCompaniesForMap();
+
+        return res.status(200).json(companies);
+
+    } catch (err) {
+        console.error('Erro em getCompaniesForMap:', err);
+
+        return res.status(500).json({
+            error: 'Erro ao buscar empresas para o mapa.'
+        });
+    }
+};
+
+
 module.exports = {
+    getCompaniesForMap,
     createLocalization,
     getLocalizations,
     getLocalization,

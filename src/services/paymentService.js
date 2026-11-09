@@ -1,9 +1,6 @@
-const pool = require("../db/connect");
+const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
-const mercadoPagoService = require("./mercadoPagoService");
-const commissionService = require("./commissionService");
-
-const PAYMENT_METHODS = new Set(["pix", "debit_card", "credit_card"]);
+const paymentDistribution = require("./paymentDistributionService");
 
 function createError(message, status) {
     const error = new Error(message);
@@ -11,286 +8,246 @@ function createError(message, status) {
     return error;
 }
 
-function amountToCents(value) {
-    const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value));
-    if (!match) throw createError("Valor da compra inválido.", 422);
-    return Number(match[1]) * 100 + Number((match[2] || "").padEnd(2, "0"));
-}
+const paymentService = {
 
-function paymentMethodFilter(method, availableMethods) {
-    const accepted = availableMethods.filter((item) => {
-        if (item.id === "account_money" || item.payment_type_id === "account_money") return true;
-        if (method === "pix") return item.id === "pix";
-        return item.payment_type_id === method;
-    });
-    const chosenMethodAvailable = method === "pix"
-        ? accepted.some((item) => item.id === "pix")
-        : accepted.some((item) => item.payment_type_id === method);
-    if (!chosenMethodAvailable) {
-        throw createError("O método escolhido não está disponível no Mercado Pago.", 422);
-    }
+    async createPayment(data) {
+        let conn;
 
-    const acceptedIds = new Set(accepted.map((item) => item.id));
-    return {
-        excluded_payment_methods: availableMethods
-            .filter((item) => !acceptedIds.has(item.id) && item.id !== "account_money" && item.payment_type_id !== "account_money")
-            .map(({ id }) => ({ id }))
-    };
-}
+        try {
+            conn = await connect.promise().getConnection();
+            await conn.beginTransaction();
 
-function formatPayment(payment, checkoutUrl) {
-    return {
-        id: payment.id,
-        status: payment.status,
-        method: payment.method,
-        checkoutUrl
-    };
-}
-
-async function createCheckout({ userId, shoppingId, method }) {
-    if (!uuid.isValid(userId) || !uuid.isValid(shoppingId)) {
-        throw createError("ID de usuário ou compra inválido.", 400);
-    }
-    if (!PAYMENT_METHODS.has(method)) {
-        throw createError("Método de pagamento inválido.", 400);
-    }
-
-    let connection;
-    try {
-        connection = await pool.promise().getConnection();
-        await connection.beginTransaction();
-
-        const [shoppingRows] = await connection.query(
-            `SELECT BIN_TO_UUID(s.id) AS id,
-                    BIN_TO_UUID(s.id_user) AS id_user,
-                    s.value,
-                    s.status
-             FROM shopping s
-             WHERE s.id = ?
-             FOR UPDATE`,
-            [uuid.toBin(shoppingId)]
-        );
-        if (shoppingRows.length === 0) throw createError("Compra não encontrada.", 404);
-        const shopping = shoppingRows[0];
-        if (String(shopping.id_user).toLowerCase() !== userId.toLowerCase()) {
-            throw createError("Acesso negado a esta compra.", 403);
-        }
-        if (shopping.status !== "accepted") {
-            throw createError("O checkout só pode ser iniciado para compras aceitas.", 409);
-        }
-        const totalCents = amountToCents(shopping.value);
-        if (totalCents <= 0) throw createError("Compras com valor zero não podem gerar checkout.", 422);
-
-        const [paymentRows] = await connection.query(
-            `SELECT BIN_TO_UUID(id) AS id, value, method, status, mp_preference_id
-             FROM payment
-             WHERE id_shopping = ?
-             ORDER BY datetime DESC, id DESC
-             LIMIT 1
-             FOR UPDATE`,
-            [uuid.toBin(shoppingId)]
-        );
-        const existing = paymentRows[0];
-        if (existing?.status === "approved") {
-            throw createError("Esta compra já possui um pagamento aprovado.", 409);
-        }
-        if (existing?.status === "pending" && existing.method !== method) {
-            throw createError("Já existe um checkout pendente com outro método de pagamento.", 409);
-        }
-        if (existing?.status === "pending" && amountToCents(existing.value) !== totalCents) {
-            throw createError("O valor do checkout pendente não corresponde mais à compra.", 409);
-        }
-        if (existing?.status === "pending" && existing.mp_preference_id) {
-            const preference = await mercadoPagoService.getPreference(existing.mp_preference_id);
-            await connection.commit();
-            return formatPayment(existing, preference.checkoutUrl);
-        }
-
-        const [itemRows] = await connection.query(
-            `SELECT p.name AS product_name, sp.quantity, sp.value AS subtotal
-             FROM shopping_product sp
-             INNER JOIN product p ON p.id = sp.id_product
-             WHERE sp.id_shopping = ?`,
-            [uuid.toBin(shoppingId)]
-        );
-        if (itemRows.length === 0) throw createError("A compra não possui itens para cobrança.", 422);
-
-        const itemTotalCents = itemRows.reduce((sum, item) => sum + amountToCents(item.subtotal), 0);
-        if (itemTotalCents !== totalCents) {
-            throw createError("O total dos itens não corresponde ao valor da compra.", 409);
-        }
-
-        const reusablePayment = existing?.status === "pending" ? existing : null;
-        const paymentId = reusablePayment?.id || uuid.generateId();
-        if (!reusablePayment) {
-            await connection.query(
-                `INSERT INTO payment (id, value, method, status, id_shopping)
-                 VALUES (?, ?, ?, 'pending', ?)`,
-                [uuid.toBin(paymentId), (totalCents / 100).toFixed(2), method, uuid.toBin(shoppingId)]
+            // Serializa a criação de pagamentos desta compra.
+            const [shoppings] = await conn.query(
+                `SELECT
+                    value,
+                    status,
+                    BIN_TO_UUID(id_user) AS id_user
+                 FROM shopping
+                 WHERE id = ?
+                 FOR UPDATE`,
+                [uuid.toBin(data.id_shopping)]
             );
-        }
 
-        const availableMethods = await mercadoPagoService.getPaymentMethods();
-        const preferenceBody = {
-            items: itemRows.map((item) => ({
-                title: `${item.product_name} (quantidade ${item.quantity})`,
-                quantity: 1,
-                unit_price: Number(item.subtotal),
-                currency_id: "BRL"
-            })),
-            external_reference: paymentId,
-            payment_methods: paymentMethodFilter(method, availableMethods)
-        };
-        if (process.env.MP_NOTIFICATION_URL) {
-            preferenceBody.notification_url = process.env.MP_NOTIFICATION_URL;
-        }
+            if (shoppings.length === 0) {
+                throw createError("Compra não encontrada.", 404);
+            }
 
-        const preference = await mercadoPagoService.createPreference(preferenceBody);
-        await connection.query(
-            `UPDATE payment
-             SET mp_preference_id = ?
-             WHERE id = ?`,
-            [preference.id, uuid.toBin(paymentId)]
-        );
-        await connection.commit();
+            const shopping = shoppings[0];
 
-        return formatPayment({ id: paymentId, method, status: "pending" }, preference.checkoutUrl);
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error("Falha no rollback de createCheckout:", rollbackError);
+            const isOwner =
+                String(shopping.id_user).toLowerCase() ===
+                String(data.userId).toLowerCase();
+
+            if (!isOwner) {
+                throw createError(
+                    "Acesso negado a esta compra.",
+                    403
+                );
+            }
+
+            if (shopping.status !== "pending") {
+                throw createError(
+                    "A compra não está disponível para pagamento.",
+                    409
+                );
+            }
+
+            const value = Number(shopping.value);
+
+            if (!Number.isFinite(value) || value <= 0) {
+                throw createError(
+                    "A compra deve possuir um valor maior que zero.",
+                    400
+                );
+            }
+
+           const [payments] = await conn.query(
+                `SELECT
+                    BIN_TO_UUID(id) AS id,
+                    value,
+                    method,
+                    status,
+                    BIN_TO_UUID(id_card) AS id_card
+                FROM payment
+                WHERE id_shopping = ?
+                AND status IN ('pending', 'approved')
+                LIMIT 1
+                FOR UPDATE`,
+                [uuid.toBin(data.id_shopping)]
+            );
+
+            if (payments.length > 0) {
+                const existing = payments[0];
+
+                const canReuse =
+                    existing.status === "pending" &&
+                    existing.method === data.method &&
+                    Number(existing.value) === Number(shopping.value);
+
+                if (!canReuse) {
+                    throw createError(
+                        "Esta compra já possui um pagamento com outro método, valor ou aprovado.",
+                        409
+                    );
+                }
+
+                const [gateways] = await conn.query(
+                    "SELECT provider, environment, request_hash FROM payment_gateway WHERE id_payment = ?",
+                    [uuid.toBin(existing.id)]
+                );
+                const gateway = gateways[0];
+                if (!gateway || gateway.provider !== data.gateway.provider ||
+                    gateway.environment !== data.gateway.environment || gateway.request_hash !== data.gateway.request_hash) {
+                    throw createError("Pagamento pendente de outro provedor, ambiente ou conjunto de dados. Consulte-o antes de repetir.", 409);
+                }
+                await conn.commit();
+
+                return {
+                    id: existing.id,
+                    value: existing.value,
+                    method: existing.method,
+                    status: existing.status,
+                    id_shopping: data.id_shopping,
+                    id_card: existing.id_card,
+                    reused: true
+                };
+            }
+            const id = uuid.generateId();
+
+            const [items] = await conn.query(
+                `SELECT sp.value, BIN_TO_UUID(p.id_user) AS seller_id
+                 FROM shopping_product sp
+                 INNER JOIN product p ON p.id = sp.id_product
+                 WHERE sp.id_shopping = ?`,
+                [uuid.toBin(data.id_shopping)]
+            );
+            const distribution = paymentDistribution.calculate(items, shopping.value);
+            const split = data.gateway.split;
+            if (split) {
+                await conn.query("SELECT id FROM `user` WHERE id = ? FOR UPDATE", [uuid.toBin(split.seller_id)]);
+                const [accounts] = await conn.query(
+                    `SELECT id FROM payment_seller_account WHERE id = ? AND id_user = ? AND environment = ?
+                     AND collector_id = ? AND marketplace_id = ? AND application_id = ? AND disconnected_at IS NULL FOR UPDATE`,
+                    [uuid.toBin(split.account_id), uuid.toBin(split.seller_id), split.environment,
+                        split.collector_id, split.marketplace_id, process.env.MERCADO_PAGO_CLIENT_ID]
+                );
+                if (!accounts.length) throw createError("O vínculo Mercado Pago mudou antes da cobrança. Confira a conexão do vendedor.", 409);
+            }
+            if (split && (distribution.sellers.length !== 1 || distribution.sellers[0].seller_id !== split.seller_id ||
+                distribution.marketplace_amount !== split.application_fee || distribution.gross_amount !== split.gross_amount)) {
+                throw createError("Os itens ou a comissão mudaram durante o pagamento. Confira a compra antes de repetir.", 409);
+            }
+
+            await conn.query(
+                `INSERT INTO payment (
+                    id,
+                    value,
+                    method,
+                    status,
+                    id_shopping,
+                    id_card
+                )
+                VALUES (?, ?, ?, 'pending', ?, NULL)`,
+                [
+                    uuid.toBin(id),
+                    shopping.value,
+                    data.method,
+                    uuid.toBin(data.id_shopping)
+                ]
+            );
+
+            await conn.query(
+                `INSERT INTO payment_gateway (id_payment, provider, environment, request_hash) VALUES (?, ?, ?, ?)`,
+                [uuid.toBin(id), data.gateway.provider, data.gateway.environment, data.gateway.request_hash]
+            );
+            await conn.query(
+                "INSERT INTO payment_distribution (id_payment, plan) VALUES (?, ?)",
+                [uuid.toBin(id), JSON.stringify(distribution)]
+            );
+            if (split) {
+                await conn.query(`INSERT INTO payment_split (id_payment, id_seller, id_account, environment, marketplace_id, collector_id, application_fee, gross_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [uuid.toBin(id), uuid.toBin(split.seller_id), uuid.toBin(split.account_id), split.environment,
+                    split.marketplace_id, split.collector_id, split.application_fee, split.gross_amount]);
+            }
+            await conn.commit();
+
+            return {
+                id,
+                value: shopping.value,
+                method: data.method,
+                status: "pending",
+                id_shopping: data.id_shopping,
+                id_card: null,
+                reused: false
+            };
+        } catch (error) {
+            if (conn) {
+                try {
+                    await conn.rollback();
+                } catch (rollbackError) {
+                    console.error(
+                        "Falha no rollback de createPayment:",
+                        rollbackError.code || rollbackError.name
+                    );
+                }
+            }
+
+            throw error;
+
+        } finally {
+            if (conn) {
+                conn.release();
             }
         }
-        throw error;
-    } finally {
-        if (connection) connection.release();
-    }
-}
-
-async function getPaymentStatus({ paymentId, userId, role }) {
-    if (!uuid.isValid(paymentId) || !uuid.isValid(userId)) {
-        throw createError("ID de usuário ou pagamento inválido.", 400);
-    }
-
-    const [rows] = await pool.promise().query(
-        `SELECT BIN_TO_UUID(p.id) AS id,
-                BIN_TO_UUID(s.id_user) AS owner_id,
-                p.status,
+    },
+    async getPaymentById(id, userId) {
+        const [rows] = await connect.promise().query(
+            `SELECT
+                BIN_TO_UUID(p.id) AS id,
+                p.value,
                 p.method,
-                p.value
-         FROM payment p
-         INNER JOIN shopping s ON s.id = p.id_shopping
-         WHERE p.id = ?`,
-        [uuid.toBin(paymentId)]
-    );
-    if (rows.length === 0) throw createError("Pagamento não encontrado.", 404);
-    const payment = rows[0];
-    if (role !== "admin" && payment.owner_id.toLowerCase() !== userId.toLowerCase()) {
-        throw createError("Acesso negado a este pagamento.", 403);
-    }
-
-    return {
-        id: payment.id,
-        status: payment.status,
-        method: payment.method,
-        value: Number(payment.value)
-    };
-}
-
-function providerStatus(status) {
-    const statuses = {
-        approved: "approved",
-        refunded: "refunded",
-        charged_back: "refunded",
-        rejected: "refused",
-        cancelled: "refused",
-        pending: "pending",
-        in_process: "pending",
-        authorized: "pending"
-    };
-    const mapped = statuses[status];
-    if (!mapped) throw createError("Status de pagamento do Mercado Pago não suportado.", 422);
-    return mapped;
-}
-
-function providerMethod(payment) {
-    const type = payment.payment_method?.type;
-    const id = payment.payment_method?.id;
-    if (id === "pix") return "pix";
-    if (["credit_card", "debit_card", "account_money"].includes(type)) return type;
-    throw createError("Método de pagamento do Mercado Pago não suportado.", 422);
-}
-
-async function applyProviderPayment(providerPayment) {
-    const externalReference = providerPayment?.external_reference;
-    if (!uuid.isValid(externalReference) || !/^\d+$/.test(String(providerPayment?.id))) {
-        throw createError("Referência ou ID de pagamento do Mercado Pago inválido.", 400);
-    }
-    const incomingStatus = providerStatus(providerPayment.status);
-    const method = providerMethod(providerPayment);
-    const amountCents = amountToCents(providerPayment.transaction_amount);
-    if (providerPayment.currency_id !== "BRL") {
-        throw createError("Moeda do pagamento não corresponde ao checkout.", 409);
-    }
-
-    let connection;
-    let finalStatus;
-    try {
-        connection = await pool.promise().getConnection();
-        await connection.beginTransaction();
-        const [rows] = await connection.query(
-            `SELECT BIN_TO_UUID(id) AS id, value, status, mp_payment_id, mp_preference_id
-             FROM payment
-             WHERE id = ?
-             FOR UPDATE`,
-            [uuid.toBin(externalReference)]
+                p.status,
+                p.datetime,
+                BIN_TO_UUID(p.id_shopping) AS id_shopping,
+                BIN_TO_UUID(p.id_card) AS id_card
+            FROM payment p
+            INNER JOIN shopping s ON s.id = p.id_shopping
+            WHERE p.id = ?
+            AND s.id_user = ?`,
+            [
+                uuid.toBin(id),
+                uuid.toBin(userId)
+            ]
         );
-        if (rows.length === 0) throw createError("Pagamento local não encontrado.", 404);
 
-        const payment = rows[0];
-        if (!payment.mp_preference_id) {
-            throw createError("O pagamento local não possui preferência Mercado Pago associada.", 409);
-        }
-        if (amountToCents(payment.value) !== amountCents) {
-            throw createError("Valor do pagamento não corresponde ao checkout.", 409);
-        }
-        const providerPaymentId = String(providerPayment.id);
-        if (payment.mp_payment_id && String(payment.mp_payment_id) !== providerPaymentId) {
-            throw createError("Outro pagamento do Mercado Pago já está associado a esta cobrança.", 409);
-        }
+        return rows[0] || null;
+    },
 
-        finalStatus = payment.status === "refunded"
-            ? "refunded"
-            : payment.status === "approved" && incomingStatus !== "refunded"
-                ? "approved"
-                : incomingStatus;
-
-        await connection.query(
-            `UPDATE payment
-             SET status = ?, method = ?, mp_payment_id = ?
-             WHERE id = ?`,
-            [finalStatus, method, providerPaymentId, uuid.toBin(externalReference)]
+    async getPaymentsByShoppingId(shoppingId, userId) {
+        const [rows] = await connect.promise().query(
+            `SELECT
+                BIN_TO_UUID(p.id) AS id,
+                p.value,
+                p.method,
+                p.status,
+                p.datetime,
+                BIN_TO_UUID(p.id_shopping) AS id_shopping,
+                BIN_TO_UUID(p.id_card) AS id_card
+            FROM payment p
+            INNER JOIN shopping s ON s.id = p.id_shopping
+            WHERE p.id_shopping = ?
+            AND s.id_user = ?
+            ORDER BY p.datetime DESC, p.id DESC`,
+            [
+                uuid.toBin(shoppingId),
+                uuid.toBin(userId)
+            ]
         );
-        await connection.commit();
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error("Falha no rollback de applyProviderPayment:", rollbackError);
-            }
-        }
-        throw error;
-    } finally {
-        if (connection) connection.release();
+
+        return rows;
     }
 
-    if (finalStatus === "approved") {
-        await commissionService.generateCommission(externalReference);
-    }
-    return { id: externalReference, status: finalStatus };
-}
+};
 
-module.exports = { createCheckout, getPaymentStatus, applyProviderPayment };
+module.exports = paymentService;
