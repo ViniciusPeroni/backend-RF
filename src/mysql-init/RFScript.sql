@@ -444,3 +444,22 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- ==========================   ===========================================
 -- Fim do script
 -- =====================================================================
+
+-- =====================================================================
+-- Admin padrão do sistema (inserção forçada)
+-- E-mail: admin@gmail.com | Senha: 123456 (hash bcrypt, custo 10)
+-- Se o e-mail já existir, a conta volta a ser admin ativa com essa senha.
+-- =====================================================================
+INSERT INTO `user` (id, role, name, email, password, status)
+VALUES (
+    UUID_TO_BIN(UUID()),
+    'admin',
+    'Administrador',
+    'admin@gmail.com',
+    '$2b$10$mnbyY8xzdUI8zc9100hy9.vMyrpvFz5BDN76zWMywjMiHlj/WIpni',
+    'active'
+)
+ON DUPLICATE KEY UPDATE
+    role = 'admin',
+    password = VALUES(password),
+    status = 'active';
