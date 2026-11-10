@@ -42,7 +42,8 @@ src/
 ## Banco e IDs
 
 - Schema base: `src/mysql-init/RFScript.sql`; começa removendo e recriando `Reaproveita_Franca`. Não executar em banco com dados importantes.
-- `src/mysql-init/migration_social_login.sql`, `migration_mercado_pago.sql` e `migration_mercado_pago_payment_id.sql` são migrações SQL manuais/aditivas. Não há ORM nem framework de migrations; aplique cada migration uma vez e na ordem indicada em banco existente.
+- `src/mysql-init/migration_social_login.sql`, `migration_mercado_pago.sql`, `migration_mercado_pago_payment_id.sql` e `migration_log_audit.sql` são migrações SQL manuais/aditivas. Não há ORM nem framework de migrations; aplique cada migration uma vez e na ordem indicada em banco existente.
+- O middleware `auditLog` (`src/middlewares/auditLog.js`) é montado no topo de `src/routes/apiRoutes.js` e registra auditoria após a resposta de cada `POST`/`PUT`/`PATCH`/`DELETE`. Ele lê `req.userId` no evento `finish`, extrai `reference_id` de params/body/resposta e grava via `src/services/auditService.js` → `logService`. `AUDIT_LOG_READS=1|true` inclui `GET`; o `chatSocket` chama `auditService.recordAudit` nos eventos de escrita. Falha de auditoria não altera a resposta HTTP nem a operação. Requer a migração `migration_log_audit.sql` (colunas `id_user`, `description`, `ip`, `user_agent` e `reference_id` anulável). Contrato em [`logs.md`](logs.md).
 - UUIDv7 é exposto como string e armazenado como `BINARY(16)`. Use `src/utils/uuid.js` na fronteira e `BIN_TO_UUID()` nas leituras; confira os módulos existentes antes de alterar padrão.
 - Use crases para identificadores reservados como `user`, `table` e `read`.
 - O boot pode continuar sem MySQL; falha de conectividade no log não comprova disponibilidade dos endpoints.

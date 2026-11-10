@@ -17,7 +17,7 @@ Este documento é um registro de fatos técnicos e pendências observadas; não 
 - Ciclo de compra/reserva: quantidade, aceite/recusa, cancelamento, conclusão e ownership.
 - Provedor/política de pagamento, tarifas, reembolso, webhooks e fonte de confirmação.
 - O contrato de notificações está em [`notification-integration.md`](notification-integration.md). Review/disputa já o utilizam; falta a implementação de pagamento. Resolver/rejeitar preserva a regra do código que permite finalizar diretamente de `aberta`, além de `em_analise`; não foi introduzida uma etapa obrigatória nova.
-- Autorização de `localization` resolvida: todas as rotas com JWT (POST exige `userId` igual ao token) e visão pública com token opcional conforme RN10; permanecem pendentes autorização em `log`, propriedade de update/delete de produto e isolamento de documentos.
+- Autorização de `localization` resolvida: todas as rotas com JWT (POST exige `userId` igual ao token) e visão pública com token opcional conforme RN10. Autorização de `log` resolvida: JWT + admin em todas as rotas, com auditoria automática de escrita pelo middleware `auditLog`. Permanecem pendentes propriedade de update/delete de produto e isolamento de documentos.
 - Autorização de `PATCH /shopping/:id/status` resolvida para admin ou vendedor único (apenas `accepted`/`refused`); ownership das consultas `/shopping-product/*` continua pendente.
 - Autenticação/autorização do socket e origens CORS configuráveis por ambiente.
 - Limpeza de mensagens: cron desativado e função `cleanUpMessages` ausente.

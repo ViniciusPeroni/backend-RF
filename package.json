@@ -9,6 +9,8 @@
     "test:notification": "node tests/notification.integration.js",
     "test:card": "node tests/card.integration.js",
     "test:localization": "node tests/localization.integration.js",
+    "test:log": "node --test test/logRoutes.test.js test/chatSocketAudit.test.js",
+    "test:log:db": "node tests/log.integration.js",
     "test:auth": "node tests/auth-registration.integration.js"
   },
   "author": "Vinícius Peroni",
