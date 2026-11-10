@@ -33,7 +33,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
 - confirme persistência e isolamento por usuário com dados sintéticos;
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
-- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento e Node.js 22+ com WebSocket nativo. Cobre validação, ownership, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
+- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O wrapper `scripts/test-notification-suite.js` cria um banco temporário `rf_notification_test_<hex>`, executa a suíte com Node.js 22+ (WebSocket nativo) e remove o banco no final, sem tocar no banco do `.env`. Cobre validação, ownership, paginação/filtros, fila de retry, expiração de JWT no socket, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
 - para cartões, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:card`. Também cria e remove usuários sintéticos e cobre validação, ownership e não exposição de `payment_token`.
 - para localização, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:localization`. Cria e remove dados sintéticos e cobre CRUD do dono, coordenadas e mascaramento do endereço do anúncio.
 

@@ -21,7 +21,7 @@ Não crie contrato porque existe tabela no schema ou porque um cliente parece es
 - Notificações persistidas são emitidas como `notification`; leitura/exclusão sincronizam com `notification_read`, `notifications_read_all` e `notification_deleted`.
 - Depois de reconectar, consulte `GET /notification/` (opcionalmente `?read=nao`): não há replay automático de eventos perdidos enquanto offline.
 - Gatilhos automáticos atuais: mensagem nova, cadastro, ativação por OTP, criação de compra (`reserva_solicitada` para cada vendedor), aceite/recusa (`reserva_aceita`/`reserva_recusada` para o comprador), cancelamento (`sistema` para cada vendedor), review (`nova_review` para avaliado), disputa aberta (demais partes e admins ativos) e resolvida/rejeitada (todas as partes) e pagamento confirmado para comprador, vendedores e administradores ativos; o contrato está em [`notification-integration.md`](notification-integration.md).
-- Teste de integração: `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification` (MySQL de desenvolvimento; remove dados sintéticos ao final).
+- Teste de integração: `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification` (cria banco temporário, executa a suíte e remove o banco ao final).
 - `join_conversation` exige identidade autenticada, UUID válido e participação na conversa.
 
-O JWT é validado no ingresso; expiração posterior não encerra a sessão automaticamente. A suíte exercita o transporte local, não substitui validação com web/mobile nem implantação com CORS adequado.
+O JWT é validado no ingresso e a sessão é desconectada quando o `exp` vence. A suíte exercita o transporte local, não substitui validação com web/mobile nem implantação com CORS adequado.

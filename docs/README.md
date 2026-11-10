@@ -35,7 +35,7 @@ Execução local e diagnóstico do túnel HTTPS: [Cloudflare local](cloudflare-l
 - Inicialização: `npm start`; porta `PORT` ou `5000`; prefixo HTTP `/api/reaproveitafranca`.
 - Aplicações web e móvel são projetos independentes. Esta documentação cobre somente `backend-RF/`.
 - Não há suíte completa de testes, lint, typecheck ou build no `package.json`.
-- Existem scripts de integração: `npm run test:notification`, `npm run test:card` e `npm run test:localization` (requerem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento). O teste de pagamentos usa `RUN_PAYMENT_DB_TESTS=1` e `node scripts/test-payment-integration.js`. Eles não cobrem todo o backend.
+- Existem scripts de integração: `npm run test:notification`, `npm run test:card` e `npm run test:localization` (requerem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento; `test:notification` cria e remove um banco temporário). O teste de pagamentos usa `RUN_PAYMENT_DB_TESTS=1` e `node scripts/test-payment-suite.js`. Eles não cobrem todo o backend.
 - `src/mysql-init/RFScript.sql` contém `DROP DATABASE`; nunca o execute em banco com dados importantes.
 - CPF/CNPJ não podem ser persistidos em texto puro. Não inclua segredos ou dados pessoais em documentação, logs ou exemplos.
 

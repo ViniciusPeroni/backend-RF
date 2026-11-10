@@ -1,6 +1,6 @@
 # Integração de notificações entre fluxos
 
-Este documento descreve os gatilhos implementados, seus destinatários e os limites da infraestrutura de notificações. Review e disputa já estão integrados; pagamento permanece como contrato futuro até existir seu fluxo de domínio.
+Este documento descreve os gatilhos implementados, seus destinatários e os limites da infraestrutura de notificações. Review, disputa e pagamento estão integrados; a entrega persistida tem fila de retry, a listagem é paginada e o socket é desconectado no vencimento do JWT.
 
 ## Escopo
 
@@ -35,6 +35,18 @@ await notificationService.notifyUser({
 
 O serviço persiste a notificação, busca o registro criado e emite o evento Socket.IO `notification` para a sala `user:<id_user>`. Não é necessário emitir o evento manualmente no controller de domínio.
 
+## Entrega e retry
+
+O caminho feliz é síncrono: `notifyUser` persiste em `notification`, lê o registro e emite `notification`. Se a persistência falhar, a falha continua sendo lançada ao chamador e o aviso é gravado em `notification_retry` com `persisted = 0` e o mesmo UUID que seria usado na notificação. Se a falha ocorrer depois do INSERT (leitura ou emissão), a linha vai para a fila com `persisted = 1`; o retry apenas reemite, sem inserir de novo.
+
+`retryPending({ limit, maxAttempts })` reivindica linhas vencidas com `FOR UPDATE SKIP LOCKED`, tenta entregar, apaga a linha em caso de sucesso e aplica backoff exponencial (2, 4, 8... segundos, teto de 300 s) em caso de falha. Depois de `maxAttempts` (padrão 5), a linha é descartada com log. `startNotificationRetryWorker` roda a cada 30 s a partir de `src/server.js`, com guarda de execução sobreposta e timer `unref`. O retry não refaz nem desfaz a operação de domínio.
+
+A fila exige a migração `src/mysql-init/migration_notification_retry.sql` em bancos existentes. Ela é aditiva e não altera notificações já gravadas.
+
+## Listagem
+
+`GET /notification/` aceita `read`, `type`, `reference_table`, `reference_id`, `limit` (1..100, padrão 50) e `offset` (>=0). A resposta continua um array, ordenado por `created_in DESC, id DESC`. Sem parâmetros, o cliente antigo continua funcionando e recebe até 50 itens.
+
 ## Tipos de notificação
 
 | Tipo | Quando usar | Destinatário |
@@ -67,7 +79,7 @@ O serviço persiste a notificação, busca o registro criado e emite o evento So
 
 ### Pagamento
 
-**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, confirma o commit e chama `paymentNotificationService.confirmed`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha na entrega não desfaz a operação. Não há outbox para repetir uma entrega interrompida.
+**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, confirma o commit e chama `paymentNotificationService.confirmed`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha na entrega não desfaz a operação. Uma entrega interrompida entra na fila `notification_retry` e é reprocessada pelo worker.
 
 **Transição que notifica:** `payment.status` de `pending` para `approved`.
 
@@ -239,6 +251,7 @@ const connect = require('../db/connect');
 - Webhooks de pagamento devem ser idempotentes; registre o identificador do evento ou verifique o status anterior antes de notificar.
 - Criação de review depende da UNIQUE existente. Abertura de disputa serializa a verificação/inserção por compra em uma transação; uma disputa ativa do mesmo autor/compra retorna 409. Resolver/rejeitar usa lock da disputa e snapshot na conexão transacional: só a primeira finalização tem sucesso, as demais retornam 409 sem aviso.
 - A edição comum condiciona seu UPDATE ao status permitido para não reabrir uma disputa finalizada nem editar como autor depois de entrar em análise por uma operação concorrente. Esses conflitos retornam 409.
+- A fila de retry reutiliza o UUID da notificação: linhas com `persisted = 1` apenas reemitem; linhas com `persisted = 0` inserem no máximo uma vez e então reemitem. Repetir o processing não cria uma segunda linha em `notification`.
 - Não emita o evento `notification` manualmente: `notifyUser` já faz isso.
 
 ## Verificação
@@ -249,16 +262,21 @@ Com banco de desenvolvimento, dependências instaladas e Node.js 22+ (WebSocket 
 $env:RF_TEST_ALLOW_DB="1"; npm run test:notification
 ```
 
-O script `tests/notification.integration.js`:
+O script `scripts/test-notification-suite.js` cria um banco temporário `rf_notification_test_<hex>` com as tabelas do schema versionado, executa `tests/notification.integration.js` apontando `DB_NAME` para ele e remove o banco no final. Não copia nem altera o banco configurado no `.env`; a suíte não pode recriar `Reaproveita_Franca`.
+
+`tests/notification.integration.js`:
 
 - exige `RF_TEST_ALLOW_DB=1` para evitar execução acidental em banco importante;
 - cria usuários, produtos, conversa e compras sintéticas;
 - testa CRUD de notificações, ownership, filtros, contagem, read-all, exclusão e eventos Socket.IO;
+- testa paginação (`limit`/`offset`), filtro por `reference_table`/`reference_id` e validação dos parâmetros;
+- testa a fila de retry: falha de persistência enfileira, entrega com o mesmo UUID, reemissão sem duplicar e descarte após o máximo de tentativas;
 - testa cadastro, OTP, nova mensagem e os gatilhos de compra/reserva;
 - chama `tests/helpers/reviewDisputeNotifications.js` para exercitar criação bilateral de review, disputa aberta/resolvida/rejeitada, destinatários, falhas de aviso/consulta, concorrência e entrega Socket.IO real;
 - rejeita payloads com tipos inválidos e conteúdo acima de 65.535 bytes UTF-8 antes de chegar ao MySQL;
 - força leituras concorrentes de reservas e testa aviso único, estoque e cancelamento com leitura desatualizada;
 - conecta clientes WebSocket ao Socket.IO real para testar `notification`, `notification_read`, `notifications_read_all` e `notification_deleted` em duas sessões do dono, sem entrega a outro usuário, anônimo ou JWT inválido/já expirado;
+- confirma que a sessão é desconectada quando o JWT vence;
 - verifica recuperação por GET de uma notificação criada offline e entrega de novos eventos após reconectar;
 - remove os dados sintéticos no final.
 
@@ -274,6 +292,8 @@ Os casos de disputa recusam banco que já tenha admins ativos antes de criar sua
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.
 - `join_conversation` agora valida identidade, UUID e participação; versões anteriores destes guias descreviam a implementação antiga.
 - Socket.IO não oferece replay automático dos avisos offline: depois de reconectar, o cliente consulta `GET /notification/` ou `?read=nao`. Os eventos em tempo real não substituem essa leitura.
-- Não há outbox, fila de retry ou garantia de entrega após queda entre commit de domínio e gravação da notificação. A proteção de concorrência das reservas não é deduplicação global do serviço.
-- JWT é validado no ingresso; expiração posterior não desconecta automaticamente sessões abertas. O teste de token expirado cobre o ingresso, não revogação contínua.
+- A fila de retry cobre falhas de persistência/entrega dentro do processo e sobrevive a reinícios porque fica no MySQL. Ela não substitui uma outbox transacional: a gravação da operação de domínio e a da notificação continuam em transações separadas, então uma queda entre o commit de domínio e qualquer tentativa de gravar a notificação ainda perde o aviso. Não há entrega "exactly once" entre processos.
+- O worker pressupõe o Socket.IO inicializado, como em `src/server.js`, que registra sockets antes de iniciar o worker. Em um processo sem `io`, a notificação é persistida mas não emitida em tempo real; o cliente ainda a recupera por `GET /notification/`.
+- JWT é validado no ingresso e a sessão é desconectada no `exp` do token. Revogação imediata de um token ainda válido (logout/troca de senha) não é propagada para sockets já conectados.
 - Transporte real local não comprova integração com front/mobile, push com app fechado ou serviços SMTP/OAuth externos.
+- O teste verifica a desconexão no vencimento com um token de curta duração; não mede precisão de relógio entre servidor e cliente.
