@@ -85,7 +85,25 @@ function connectNotificationSocket(baseUrl, auth = {}) {
         });
     }
 
-    return { ready, events, waitForEvent, close };
+    function waitForClose(timeoutMs = 5000) {
+        if (socket.readyState === WebSocket.CLOSED) return Promise.resolve();
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                socket.removeEventListener('close', onClose);
+                reject(new Error('Timeout aguardando o fechamento do WebSocket de teste.'));
+            }, timeoutMs);
+
+            function onClose() {
+                clearTimeout(timeout);
+                resolve();
+            }
+
+            socket.addEventListener('close', onClose, { once: true });
+        });
+    }
+
+    return { ready, events, waitForEvent, waitForClose, close };
 }
 
 module.exports = { connectNotificationSocket };

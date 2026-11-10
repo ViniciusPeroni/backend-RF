@@ -527,6 +527,256 @@ async function main() {
         check('notificação excluída não é encontrada', () => assertStatus(r, 404, 'excluída'));
 
         // =================================================================
+        // Listagem paginada e filtros por referência
+        // =================================================================
+        const paginationIds = [];
+        for (const [index, title] of ['Paginação 1', 'Paginação 2', 'Paginação 3', 'Paginação 4'].entries()) {
+            const created = await req('POST', '/api/reaproveitafranca/notification/', tokenA, {
+                type: 'sistema',
+                title,
+                content: `Conteúdo ${index}`,
+                reference_table: 'pagination',
+                reference_id: index === 0 ? sellerBId : sellerCId
+            });
+            assertStatus(created, 201, `fixture de paginação ${index}`);
+            paginationIds.push(created.body.id);
+        }
+
+        r = await req('GET', '/api/reaproveitafranca/notification/?limit=2&offset=0', tokenA);
+        const page1 = r.body;
+        check('GET /notification limita a primeira página', () => {
+            assertStatus(r, 200, 'primeira página');
+            assert.ok(Array.isArray(page1));
+            assert.strictEqual(page1.length, 2);
+        });
+
+        r = await req('GET', '/api/reaproveitafranca/notification/?limit=2&offset=2', tokenA);
+        const page2 = r.body;
+        check('GET /notification pagina sem repetir itens', () => {
+            assertStatus(r, 200, 'segunda página');
+            assert.strictEqual(page2.length, 2);
+            const ids = new Set(page1.map((item) => item.id));
+            assert.ok(page2.every((item) => !ids.has(item.id)), 'páginas se sobrepõem');
+        });
+
+        r = await req('GET', '/api/reaproveitafranca/notification/?reference_table=pagination&limit=10', tokenA);
+        check('GET /notification filtra por reference_table', () => {
+            assertStatus(r, 200, 'filtro por tabela');
+            assert.strictEqual(r.body.length, 4);
+            assert.ok(r.body.every((item) => item.reference_table === 'pagination'));
+        });
+
+        r = await req('GET', `/api/reaproveitafranca/notification/?reference_table=pagination&reference_id=${sellerBId}`, tokenA);
+        check('GET /notification filtra por reference_id', () => {
+            assertStatus(r, 200, 'filtro por referência');
+            assert.strictEqual(r.body.length, 1);
+            assert.strictEqual(r.body[0].reference_id, sellerBId);
+        });
+
+        r = await req('GET', '/api/reaproveitafranca/notification/?reference_table=%20pagination%20&limit=10', tokenA);
+        check('GET /notification normaliza reference_table com espaços', () => {
+            assertStatus(r, 200, 'referência com espaços');
+            assert.strictEqual(r.body.length, 4);
+        });
+
+        r = await req('GET', '/api/reaproveitafranca/notification/', tokenA);
+        check('GET /notification sem paginação mantém o formato de array', () => {
+            assertStatus(r, 200, 'sem parâmetros');
+            assert.ok(Array.isArray(r.body));
+            assert.ok(r.body.length >= 4);
+        });
+
+        for (const [label, query] of [
+            ['limit zero', 'limit=0'],
+            ['limit acima de 100', 'limit=101'],
+            ['limit não inteiro', 'limit=1.5'],
+            ['limit não numérico', 'limit=abc'],
+            ['offset negativo', 'offset=-1'],
+            ['offset não inteiro', 'offset=2.5'],
+            ['offset acima do máximo', 'offset=2147483648'],
+            ['reference_id inválido', 'reference_id=nao-e-uuid'],
+            ['reference_table longa', `reference_table=${'t'.repeat(31)}`]
+        ]) {
+            r = await req('GET', `/api/reaproveitafranca/notification/?${query}`, tokenA);
+            check(`GET /notification com ${label} retorna 400`, () => assertStatus(r, 400, label));
+        }
+
+        await connect.promise().query(
+            `DELETE FROM notification WHERE id IN (${paginationIds.map(() => '?').join(', ')})`,
+            paginationIds.map((id) => uuid.toBin(id))
+        );
+
+        // =================================================================
+        // Fila de retry persistida
+        // =================================================================
+        const failNotificationInsert = () => {
+            const originalQuery = connect.query;
+            connect.query = function (sql) {
+                if (typeof sql === 'string' && /INSERT\s+INTO\s+notification\s*\(/i.test(sql)) {
+                    const error = new Error('falha sintética de persistência');
+                    error.code = 'ER_LOCK_WAIT_TIMEOUT';
+                    throw error;
+                }
+                return originalQuery.apply(this, arguments);
+            };
+            return () => { connect.query = originalQuery; };
+        };
+
+        await checkAsync('falha de persistência enfileira retry e o worker entrega com o mesmo id', async () => {
+            const title = `Retry ${suffix}`;
+            const restore = failNotificationInsert();
+            let caught = null;
+            try {
+                await notificationService.notifyUser({
+                    id_user: buyerId,
+                    type: 'sistema',
+                    title,
+                    content: 'Falha antes de persistir',
+                    reference_table: 'pagination'
+                });
+            } catch (error) {
+                caught = error;
+            } finally {
+                restore();
+            }
+
+            assert.ok(caught, 'a falha deve continuar visível para o chamador');
+            assert.strictEqual(caught.retryQueued, true);
+
+            const [queued] = await connect.promise().query(
+                `SELECT BIN_TO_UUID(id) AS id, persisted, attempts
+                 FROM notification_retry
+                 WHERE title = ? AND id_user = ?`,
+                [title, uuid.toBin(buyerId)]
+            );
+            assert.strictEqual(queued.length, 1, JSON.stringify(queued));
+            assert.strictEqual(Number(queued[0].persisted), 0);
+            assert.strictEqual(Number(queued[0].attempts), 0);
+
+            const result = await notificationService.retryPending({ limit: 50 });
+            assert.ok(result.delivered >= 1, JSON.stringify(result));
+
+            const [delivered] = await connect.promise().query(
+                'SELECT BIN_TO_UUID(id) AS id FROM notification WHERE title = ? AND id_user = ?',
+                [title, uuid.toBin(buyerId)]
+            );
+            assert.strictEqual(delivered.length, 1);
+            assert.strictEqual(delivered[0].id, queued[0].id);
+
+            const [remaining] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification_retry WHERE title = ? AND id_user = ?',
+                [title, uuid.toBin(buyerId)]
+            );
+            assert.strictEqual(Number(remaining[0].total), 0);
+
+            await notificationService.retryPending({ limit: 50 });
+            const [afterSecondRun] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification WHERE title = ? AND id_user = ?',
+                [title, uuid.toBin(buyerId)]
+            );
+            assert.strictEqual(Number(afterSecondRun[0].total), 1, 'retry duplicou a notificação');
+        });
+
+        await checkAsync('retry de linha já persistida apenas reemite sem duplicar', async () => {
+            const title = `Retry persistido ${suffix}`;
+            const notification = await notificationService.notifyUser({
+                id_user: buyerId,
+                type: 'sistema',
+                title,
+                content: 'Já estava no banco'
+            });
+            const emissionsBefore = socketEmissions
+                .filter((item) => item.event === 'notification' && item.payload.id === notification.id).length;
+
+            await connect.promise().query(
+                `INSERT INTO notification_retry (id, id_user, type, title, content, persisted)
+                 VALUES (?, ?, 'sistema', ?, 'Já estava no banco', 1)`,
+                [uuid.toBin(notification.id), uuid.toBin(buyerId), title]
+            );
+
+            await notificationService.retryPending({ limit: 50 });
+
+            const [rows] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification WHERE id = ?',
+                [uuid.toBin(notification.id)]
+            );
+            assert.strictEqual(Number(rows[0].total), 1);
+            const [retryRows] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification_retry WHERE id = ?',
+                [uuid.toBin(notification.id)]
+            );
+            assert.strictEqual(Number(retryRows[0].total), 0);
+            const emissionsAfter = socketEmissions
+                .filter((item) => item.event === 'notification' && item.payload.id === notification.id).length;
+            assert.strictEqual(emissionsAfter, emissionsBefore + 1, 'retry não reemitiu');
+        });
+
+        await checkAsync('retry descarta a linha após o máximo de tentativas', async () => {
+            const title = `Retry descarte ${suffix}`;
+            const retryId = uuid.generateId();
+            await connect.promise().query(
+                `INSERT INTO notification_retry (id, id_user, type, title, attempts)
+                 VALUES (?, ?, 'sistema', ?, 4)`,
+                [uuid.toBin(retryId), uuid.toBin(buyerId), title]
+            );
+
+            const restore = failNotificationInsert();
+            const originalConsoleError = console.error;
+            console.error = () => {};
+            try {
+                await notificationService.retryPending({ limit: 50, maxAttempts: 5 });
+            } finally {
+                console.error = originalConsoleError;
+                restore();
+            }
+
+            const [retryRows] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification_retry WHERE id = ?',
+                [uuid.toBin(retryId)]
+            );
+            assert.strictEqual(Number(retryRows[0].total), 0, 'linha descartada deveria sumir');
+            const [notifications] = await connect.promise().query(
+                'SELECT COUNT(*) AS total FROM notification WHERE id = ?',
+                [uuid.toBin(retryId)]
+            );
+            assert.strictEqual(Number(notifications[0].total), 0);
+        });
+
+        await checkAsync('worker de retry entrega, não duplica instância e para', async () => {
+            const title = `Retry worker ${suffix}`;
+            const retryId = uuid.generateId();
+            await connect.promise().query(
+                `INSERT INTO notification_retry (id, id_user, type, title)
+                 VALUES (?, ?, 'sistema', ?)`,
+                [uuid.toBin(retryId), uuid.toBin(buyerId), title]
+            );
+
+            const timer = notificationService.startNotificationRetryWorker({ intervalMs: 20, limit: 10 });
+            assert.strictEqual(
+                notificationService.startNotificationRetryWorker({ intervalMs: 20 }),
+                timer,
+                'worker duplicado'
+            );
+
+            try {
+                const deadline = Date.now() + 3000;
+                let delivered = 0;
+                while (Date.now() < deadline) {
+                    const [rows] = await connect.promise().query(
+                        'SELECT COUNT(*) AS total FROM notification WHERE id = ?',
+                        [uuid.toBin(retryId)]
+                    );
+                    delivered = Number(rows[0].total);
+                    if (delivered === 1) break;
+                    await new Promise((resolve) => setTimeout(resolve, 25));
+                }
+                assert.strictEqual(delivered, 1, 'worker não entregou a notificação');
+            } finally {
+                notificationService.stopNotificationRetryWorker();
+            }
+        });
+
+        // =================================================================
         // Ativação por OTP -> notificação automática
         // =================================================================
         await connect.promise().query(
@@ -678,6 +928,7 @@ async function main() {
             on(event, handler) {
                 if (event === 'send_message') sendHandler = handler;
             },
+            once() {},
             join(room) { joinedChatRooms.push(room); }
         };
         for (const handler of chatConnectionHandlers) handler(fakeChatSocket);
@@ -747,7 +998,8 @@ async function main() {
         const joinedRooms = [];
         notificationConnection({
             handshake: { auth: { token: tokenA }, query: {}, headers: {} },
-            join(room) { joinedRooms.push(room); }
+            join(room) { joinedRooms.push(room); },
+            once() {}
         });
         check('socket com JWT entra na sala user:<id>', () => {
             assert.deepStrictEqual(joinedRooms, [userRoom(buyerId)]);
@@ -756,7 +1008,8 @@ async function main() {
         const anonymousRooms = [];
         notificationConnection({
             handshake: { auth: {}, query: {}, headers: {} },
-            join(room) { anonymousRooms.push(room); }
+            join(room) { anonymousRooms.push(room); },
+            once() {}
         });
         check('socket sem JWT não entra em sala de usuário', () => {
             assert.deepStrictEqual(anonymousRooms, []);
@@ -1181,6 +1434,16 @@ async function main() {
             });
         }
 
+        await checkAsync('Socket.IO real desconecta a sessão no vencimento do JWT', async () => {
+            const expiringToken = jwt.sign(
+                { id: buyerId, name: 'Expira' },
+                process.env.SECRET,
+                { expiresIn: '5s' }
+            );
+            const expiring = await openClient({ token: expiringToken });
+            await expiring.waitForClose(15000);
+        });
+
         await Promise.all(owners.map((client) => client.close()));
         const offline = await req('POST', '/api/reaproveitafranca/notification/', tokenA, { type: 'sistema', title: 'Aviso offline' });
         await checkAsync('reconexão recupera pelo HTTP notificação persistida enquanto offline', async () => {
@@ -1254,6 +1517,11 @@ async function main() {
 
         const syntheticUsers = [buyerId, sellerBId, sellerCId, otpUserId, ...extraUserIds];
         if (signupUserId) syntheticUsers.push(signupUserId);
+
+        await tryCleanup('notification_retry', () => connect.promise().query(
+            `DELETE FROM notification_retry WHERE id_user IN (${syntheticUsers.map(() => '?').join(', ')})`,
+            syntheticUsers.map((id) => uuid.toBin(id))
+        ));
 
         await tryCleanup('notification', () => connect.promise().query(
             `DELETE FROM notification WHERE id_user IN (${syntheticUsers.map(() => '?').join(', ')})`,
