@@ -15,6 +15,8 @@
 - Em 07/11/2026: os dois vínculos de vendedor estavam desativados (desvinculados em 05/11) e quatro callbacks OAuth posteriores consumiram o state sem reativar vínculo. O token guardado do recebedor `1763794829` retornou 401 (autorização revogada); o recebedor `386678534` tinha `sell.allow=true`, `required_action=simple_registration` e `billing/list` com `address_pending`. Novo Quick Tunnel `corrected-reflect-bond-product.trycloudflare.com` (diagnóstico 20241) com `.env` atualizada e `configurationMatches: true`; o processo antigo na 20242 ficou sem conexão. Adicionados códigos de diagnóstico (`seller_is_marketplace`, `collector_linked_to_other_user`, `seller_authorization_revoked`, `seller_account_restricted` com `seller_codes`, `provider_message` em 401/403 do split) e bloqueio de qualquer `sell.allow=false`. Suíte: 284 cenários (98 pagamentos), sem cobranças externas. Nenhuma cobrança real criada.
 - Ainda em 07/11/2026 Bryan revinculou `386678534` e confirmou Pix real com split: pagamento `approved/accredited`, compra `accepted`, comissão 0.05 registrada, sem `needs_review`. Para cartões, a doc Split 1:1 (BR) manda tokenizar com a public key do integrador e cobrar com o access token do vendedor, como o backend já faz. Sandbox oficial (`live_mode=false`, banco temporário): Mastercard/Visa aprovados, recusa por saldo, pendência e débito Elo aprovado pela Payments API; Orders API segue bloqueada para credencial de teste. O catálogo produtivo lista `visa/master/elo` como crédito e pré-pago com o mesmo id; a conciliação passou a aceitar a família cartão (crédito/débito/pré-pago) para não travar pagamento já cobrado, mantendo Pix exigindo `bank_transfer`. Suíte: 286 cenários (100 pagamentos). Cartão real com split ainda não foi validado.
 
+- Em 10/11/2026, a pedido do responsável pela branch `feature/pedro/controllerLog`, foi autorizado concluir o módulo de logs: CRUD com JWT de administrador, validação/paginação, migração aditiva `migration_log_audit.sql`, auditoria automática de escrita HTTP (`auditLog`) e de eventos de Socket.IO (`auditService`), com leitura auditável via `AUDIT_LOG_READS`. Não foram alteradas regras de login Google/LinkedIn nem de outros domínios. Verificação: `npm run test:log` (15 cenários) e suíte `test/*.test.js` (29 cenários) sem banco; `npm run test:log:db` passou 21 cenários em MySQL real e removeu os dados sintéticos; schema local contém colunas, índices e FK da migração. Contrato em `docs/logs.md`.
+
 - Responda sempre em português brasileiro, inclusive perguntas e relatórios.
 - Não crie, altere ou exclua arquivos de código sem autorização explícita de Bryan para a alteração solicitada. Por padrão, apenas oriente, leia e revise o código. A única exceção é o arquivo `AGENTS.md`, que pode ser atualizado. Pedidos de orientação ou de execução de testes não autorizam alterações no código; testes e operações no banco devem respeitar o escopo autorizado.
 - Não faça commit nem push sem autorização explícita. Não edite os projetos irmãos `FrontEnd-RF/` e `Mobile-RF/` em tarefas restritas ao backend.
@@ -28,7 +30,7 @@
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
 - Há teste específico de pagamentos em `scripts/test-payment-integration.js`, com MySQL real e transporte externo interceptado; exige `RUN_PAYMENT_DB_TESTS=1`, nunca produção. Não há suíte geral, lint, typecheck ou build. Use `node --check` para sintaxe; configuração e cURLs em `docs/payments.md`.
-- Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. `npm run test:log` valida rotas, auditoria HTTP e socket com services mockados, sem banco; `npm run test:log:db` faz o teste de integração real (também exige `RF_TEST_ALLOW_DB=1`). São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 - No merge da `main` de 07/11/2026, Bryan escolheu manter este módulo de pagamentos (Pix/cartão com split, variáveis `MERCADO_PAGO_*`). O Checkout Pro da `main` (`MP_*`, `mercadoPagoService`, `paymentWebhookService` e seus testes) ficou fora.
 
 ## Fluxo de trabalho do agente
@@ -54,11 +56,11 @@
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testconnect`, com a mesma caixa do arquivo, e confia apenas no proxy local. O túnel deve encaminhar para `http://127.0.0.1:5000` (ou `PORT`), sem depender do IP do Wi-Fi.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
-- As camadas de autorização de compras, itens de compra, documentos, logs, localização e propriedade de produto têm lacunas descritas em [`docs/security-privacy.md`](docs/security-privacy.md). Não as amplie inadvertidamente.
+- As camadas de autorização de compras, itens de compra, documentos, localização e propriedade de produto têm lacunas descritas em [`docs/security-privacy.md`](docs/security-privacy.md). Logs foram resolvidos: `/log/*` exige JWT + admin e a escrita é auditada automaticamente por `src/middlewares/auditLog.js`.
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, as de pagamento (`migration_payment_*.sql`) e `migration_localization_coordinates.sql`. `migration_mercado_pago*.sql` vieram com o Checkout Pro da `main`, que não é usado nesta branch. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, as de pagamento (`migration_payment_*.sql`), `migration_localization_coordinates.sql` e `migration_log_audit.sql`. `migration_mercado_pago*.sql` vieram com o Checkout Pro da `main`, que não é usado nesta branch. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
 - Em 07/11/2026 o banco local recebeu `localization.latitude`/`longitude` pela migração de coordenadas. Reconfirme o schema antes da integração mobile.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
@@ -72,4 +74,5 @@
 - Contrato observado: [`docs/api-contract.md`](docs/api-contract.md); arquitetura: [`docs/architecture.md`](docs/architecture.md).
 - Fluxo de agentes e evidências: [`docs/agent-workflow.md`](docs/agent-workflow.md), [`docs/feature-readiness.md`](docs/feature-readiness.md), [`docs/quality.md`](docs/quality.md).
 - Segurança, produto, localização, integração e decisões: consulte os links no índice.
+- Auditoria: contrato, tabela, middleware e Socket.IO em [`docs/logs.md`](docs/logs.md).
 - Ao mudar comportamento confirmado, atualize os documentos afetados. Preserve desconhecidos como desconhecidos e não documente credenciais ou dados pessoais.
