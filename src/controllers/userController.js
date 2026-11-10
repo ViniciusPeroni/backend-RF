@@ -4,7 +4,6 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const axios = require("axios");
 const crypto = require("crypto");
-const { OAuth2Client } = require("google-auth-library");
 const uuid = require('../utils/uuid');
 const doc = require('../services/docService');
 const loc = require('../services/localizationService');
@@ -27,8 +26,8 @@ async function notifyWelcome(id_user, role) {
             type: 'sistema',
             title: 'Bem-vindo(a) ao Reaproveita Franca',
             content: role === 'company'
-                ? 'Sua empresa foi cadastrada. Confirme seu e-mail para ativar a conta.'
-                : 'Sua conta foi criada. Confirme seu e-mail para ativar a conta.'
+                ? 'Sua empresa foi cadastrada. Confirme seu e-mail, se necessário, para acessar a conta.'
+                : 'Sua conta foi criada. Confirme seu e-mail, se necessário, para acessar a conta.'
         });
     } catch (error) {
         console.error('Erro ao criar notificação de boas-vindas:', error);
@@ -145,12 +144,15 @@ const createUser = async (req, res) => {
 const createCompany = async (req, res) => {
     const { cpf, name, email, cnpj, password, cellphone, zip_code, street, neighborhood, number, city, state } = req.body;
     const photo = req.file ? req.file.buffer : null;
+    const googleIdentity = req.googleIdentity;
 
-    if (!cpf || !name || !email || !cnpj || !password || !cellphone || !zip_code || !street || !neighborhood || !number || !city || !state) {
+    if (!cpf || !name || !email || !cnpj || (!googleIdentity && !password) || !cellphone || !zip_code || !street || !neighborhood || !number || !city || !state) {
         return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
     }
 
-    const role = req.body.role || 'company';
+    if ([cpf, name, email, cnpj, cellphone, zip_code, street, neighborhood, number, city, state].some(value => typeof value !== 'string' || !value.trim())) return res.status(400).json({ error: 'Informe os dados da empresa em texto.' });
+    if (!/^\d{11}$/.test(cpf) || !/^\d{14}$/.test(cnpj) || !/^\d{8}$/.test(zip_code) || !/^[A-Za-z]{2}$/.test(state) || name.length > 100 || email.length > 255 || number.length > 6) return res.status(400).json({ error: 'Confira os documentos e o endereço da empresa.' });
+    const role = 'company';
 
     if (!VALID_ROLES.includes(role)) {
         return res.status(400).json({ error: 'Role inválida. Use: user, company ou admin.' });
@@ -160,7 +162,7 @@ const createCompany = async (req, res) => {
         return res.status(400).json({ error: 'Email inválido.' });
     }
 
-    if (password.length < 6) {
+    if (!googleIdentity && (typeof password !== 'string' || password.length < 6)) {
         return res.status(400).json({ error: 'A senha deve ter no mínimo 6 caracteres.' });
     }
 
@@ -189,12 +191,16 @@ const createCompany = async (req, res) => {
             throw err;
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        if (googleIdentity) {
+            const [linked] = await conn.query('SELECT id FROM `user` WHERE google_id = ?', [googleIdentity.sub]);
+            if (linked.length) { const error = new Error('Conta vinculada a outro acesso Google.'); error.status = 409; throw error; }
+        }
+        const hashedPassword = googleIdentity ? null : await bcrypt.hash(password, 10);
 
         await conn.query(
-            `INSERT INTO \`user\` (id, role, name, email, password, cellphone, photo)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [uuid.toBin(id), role, name, email, hashedPassword, cellphone, photo]
+            `INSERT INTO \`user\` (id, role, name, email, password, cellphone, photo, google_id, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [uuid.toBin(id), role, name, email, hashedPassword, cellphone, photo, googleIdentity?.sub || null, googleIdentity ? 'active' : 'awaitingForEmail']
         );
 
         await doc.createDoc({ userId: id, docType: 'CPF', doc: cpf }, conn);
@@ -229,6 +235,12 @@ const createCompany = async (req, res) => {
         return res.status(500).json({ error: 'Erro ao criar usuário.' });
     } finally {
         if (conn) conn.release();
+    }
+
+    if (googleIdentity) {
+        const user = { id, role, name, email, status: 'active' };
+        await notifyWelcome(id, role);
+        return res.status(201).json({ message: 'Empresa criada com Google.', token: issueSocialToken(user), user, mustChangePassword: false });
     }
 
     let emailSent = true;
@@ -386,7 +398,8 @@ const loginUser = async (req, res) => {
         }
 
         if (user.status !== 'active' && user.status !== 'firstLogin') {
-            return res.status(403).json({ error: 'Conta ainda não ativada. Confirme seu email.' });
+            if (user.status === 'awaitingForEmail') return res.status(403).json({ error: 'Conta ainda não ativada. Confirme seu email.', code: 'EMAIL_VERIFICATION_REQUIRED', verification: { id: user.id, email } });
+            return res.status(403).json({ error: 'Conta inativa. Entre em contato com o suporte.' });
         }
 
         const token = jwt.sign(
@@ -484,28 +497,16 @@ async function findOrCreateSocialUser({ provider, providerId, email, name }) {
 
 // POST /user/login/google — Opção A (ID Token, sem OAuth completo)
 const loginGoogle = async (req, res) => {
-    const idToken = req.body?.idToken || req.body?.credential;
-    if (typeof idToken !== 'string' || !idToken.trim() || idToken.length > 10000) return res.status(400).json({ error: 'idToken é obrigatório e deve ser textual.' });
-    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-    if (!clientId || !process.env.SECRET) return res.status(503).json({ error: 'Login Google não configurado.' });
     let payload;
+    try { payload = await require('../services/googleIdentityService').verifyGoogleIdentity(req.body?.idToken || req.body?.credential); }
+    catch (error) { return res.status([400, 401, 403, 503].includes(error.status) ? error.status : 500).json({ error: error.status ? error.message : 'Não foi possível validar o Google.' }); }
     try {
-        const client = new OAuth2Client(clientId);
-        const ticket = await client.verifyIdToken({ idToken, audience: clientId });
-        payload = ticket.getPayload();
-    } catch (error) {
-        const networkError = ['ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET'].includes(error.code) || error.response?.status >= 500;
-        return res.status(networkError ? 503 : 401).json({ error: networkError ? 'Google temporariamente indisponível.' : 'Token Google inválido ou expirado.' });
-    }
-    if (!payload || typeof payload.sub !== 'string' || !payload.sub || payload.sub.length > 255 || typeof payload.email !== 'string' || payload.email.length > 255 || !isValidEmail(payload.email.trim())) return res.status(401).json({ error: 'Token Google inválido.' });
-    if (payload.email_verified !== true) return res.status(403).json({ error: 'E-mail do Google não verificado.' });
-    try {
-        const { user, created } = await require('../services/googleLoginService').findOrCreateGoogleUser(payload);
+        const { user, created } = await require('../services/googleLoginService').findOrCreateGoogleUser(payload, 0, req.body.accountType === 'company');
         if (created) await notifyWelcome(user.id, user.role);
         const token = issueSocialToken(user);
         return res.status(200).json({ message: 'Login com Google realizado com sucesso.', token, user, mustChangePassword: user.status === 'firstLogin' });
     } catch (error) {
-        if ([403, 409].includes(error.status)) return res.status(error.status).json({ error: error.message });
+        if ([403, 404, 409].includes(error.status)) return res.status(error.status).json({ error: error.message });
         return res.status(500).json({ error: 'Não foi possível concluir o acesso com Google. Tente novamente.' });
     }
 };
