@@ -23,7 +23,7 @@ async function fetchGoogleAvatarBuffer(url) {
 }
 
 // Google-only flow. LinkedIn's existing helper is deliberately untouched.
-async function findOrCreateGoogleUser(payload, attempt = 0) {
+async function findOrCreateGoogleUser(payload, attempt = 0, companyOnly = false) {
     const email = payload.email.trim().toLowerCase();
     const authoritativeEmail = email.endsWith('@gmail.com') || (payload.email_verified === true && typeof payload.hd === 'string' && payload.hd.length > 0);
     const photoBuffer = await fetchGoogleAvatarBuffer(payload.picture);
@@ -36,6 +36,7 @@ async function findOrCreateGoogleUser(payload, attempt = 0) {
         const [matching] = linked.length ? [linked] : await connection.query(`SELECT ${projection} FROM \`user\` WHERE email = ? FOR UPDATE`, [email]);
         let user = matching[0], created = false;
         if (user) {
+            if (companyOnly && user.role !== 'company') throw failure(403, 'Esta conta não é de empresa. Entre como comprador.');
             assertActive(user);
             if (!linked.length) {
                 if (user.google_id && user.google_id !== payload.sub) throw failure(409, 'Conta vinculada a outro acesso Google.');
@@ -58,6 +59,7 @@ async function findOrCreateGoogleUser(payload, attempt = 0) {
             await connection.query(`UPDATE \`user\` SET ${updateFields.join(', ')} WHERE id = ?`, updateParams);
             if (user.status === 'awaitingForEmail') user.status = 'active';
         } else {
+            if (companyOnly) throw failure(404, 'Empresa ainda não cadastrada. Preencha o cadastro de empresa com Google.');
             const id = uuid.generateId();
             const name = typeof payload.name === 'string' && payload.name.trim() ? payload.name.trim().slice(0, 100) : email.split('@')[0].slice(0, 100);
             await connection.query(
@@ -73,7 +75,7 @@ async function findOrCreateGoogleUser(payload, attempt = 0) {
         await connection.rollback();
         if (['ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK'].includes(error.code) && attempt < 2) {
             connection.release(); released = true;
-            return findOrCreateGoogleUser(payload, attempt + 1);
+            return findOrCreateGoogleUser(payload, attempt + 1, companyOnly);
         }
         throw error;
     } finally {
