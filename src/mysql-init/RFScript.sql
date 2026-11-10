@@ -403,13 +403,23 @@ CREATE TABLE otp (
 DROP TABLE IF EXISTS log;
 CREATE TABLE log(
     id            BINARY(16) primary key,
-    reference_id  BINARY(16) NOT NULL,
+    reference_id  BINARY(16) NULL,
+    id_user       BINARY(16) NULL,
     status        VARCHAR(50) NOT NULL,
     operation     VARCHAR(20) NOT NULL,
     `table`       VARCHAR(20) NOT NULL,
+    description   VARCHAR(255) NULL,
+    ip            VARCHAR(45) NULL,
+    user_agent    VARCHAR(255) NULL,
     datetime      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY `idx_log_reference` (`reference_id`),
-    KEY `idx_log_table` (`table`)
+    KEY `idx_log_user` (`id_user`),
+    KEY `idx_log_table` (`table`),
+    KEY `idx_log_datetime` (`datetime`),
+    CONSTRAINT fk_log_user
+        FOREIGN KEY (id_user)
+        REFERENCES user(id)
+        ON DELETE SET NULL
 );
 
 -- =====================================================================
