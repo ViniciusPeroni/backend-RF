@@ -551,3 +551,36 @@ ON DUPLICATE KEY UPDATE
     role = 'admin',
     password = VALUES(password),
     status = 'active';
+
+-- =====================================================================
+-- Comprador e empresa padrão do sistema (inserção forçada)
+-- E-mails: usuario@gmail.com e empresa@gmail.com | Senha: 123456 (hash bcrypt, custo 10)
+-- Se o e-mail já existir, a conta volta ao perfil certo, ativa e com essa senha.
+-- =====================================================================
+INSERT INTO `user` (id, role, name, email, password, status)
+VALUES (
+    UUID_TO_BIN(UUID()),
+    'user',
+    'Usuário Padrão',
+    'usuario@gmail.com',
+    '$2b$10$mnbyY8xzdUI8zc9100hy9.vMyrpvFz5BDN76zWMywjMiHlj/WIpni',
+    'active'
+)
+ON DUPLICATE KEY UPDATE
+    role = 'user',
+    password = VALUES(password),
+    status = 'active';
+
+INSERT INTO `user` (id, role, name, email, password, status)
+VALUES (
+    UUID_TO_BIN(UUID()),
+    'company',
+    'Empresa Padrão',
+    'empresa@gmail.com',
+    '$2b$10$mnbyY8xzdUI8zc9100hy9.vMyrpvFz5BDN76zWMywjMiHlj/WIpni',
+    'active'
+)
+ON DUPLICATE KEY UPDATE
+    role = 'company',
+    password = VALUES(password),
+    status = 'active';
