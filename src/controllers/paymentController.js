@@ -56,7 +56,14 @@ const createPayment = async (req, res) => {
             });
         }
 
-        if (shopping.status !== "pending") {
+        // Aceite antes do pagamento: só paga depois que a empresa aceitou.
+        if (shopping.status === "pending") {
+            return res.status(409).json({
+                error: "A empresa ainda não aceitou esta reserva. O pagamento é liberado depois do aceite."
+            });
+        }
+
+        if (shopping.status !== "accepted") {
             return res.status(409).json({
                 error: "A compra não está disponível para pagamento."
             });

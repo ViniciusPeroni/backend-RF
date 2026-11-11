@@ -113,10 +113,11 @@ module.exports = {
                     ON DUPLICATE KEY UPDATE value = VALUES(value)`, [uuid.toBin(uuid.generateId()), plan.percentage,
                     checkout.status === "refunded" ? 0 : splits[0].application_fee, uuid.toBin(id)]);
             }
-            if (checkout.status === "approved" && shopping.status === "pending") {
-                await conn.query("UPDATE shopping SET status = 'accepted' WHERE id = ?", [uuid.toBin(payment.id_shopping)]);
-            }
-            const cancel = checkout.status === "refunded" || ["canceled", "cancelled", "expired"].includes(checkout.provider_status);
+            // Aceite antes do pagamento: o pagamento não aceita mais a reserva sozinho.
+            // Pix vencido/cancelado numa reserva aceita mantém a reserva (o comprador
+            // pode pagar de novo até o prazo); só o estorno cancela e devolve o estoque.
+            const providerCancelled = ["canceled", "cancelled", "expired"].includes(checkout.provider_status);
+            const cancel = checkout.status === "refunded" || (providerCancelled && shopping.status === "pending");
             if (cancel && ["pending", "accepted"].includes(shopping.status)) {
                 const [others] = await conn.query("SELECT id FROM payment WHERE id_shopping = ? AND id <> ? AND status IN ('pending', 'approved') LIMIT 1", [uuid.toBin(payment.id_shopping), uuid.toBin(id)]);
                 if (!others.length) {

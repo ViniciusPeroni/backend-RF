@@ -5,6 +5,7 @@ const cors = require("cors");
 const app = require("./index");
 const iniciarSockets = require("./sockets");
 const { startNotificationRetryWorker } = require("./services/notificationService");
+const { startReservationExpiryWorker } = require("./services/shoppingService");
 
 const PORT = process.env.PORT || 5000;
 
@@ -45,6 +46,9 @@ iniciarSockets(io);
 
 // Reprocessa notificações que falharam depois da operação de domínio.
 startNotificationRetryWorker();
+
+// Cancela reservas aceitas e não pagas dentro do prazo (RESERVATION_PAYMENT_HOURS).
+startReservationExpiryWorker();
 
 // Inicia o servidor
 httpServer.listen(PORT, () => {

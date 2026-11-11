@@ -23,15 +23,32 @@ function buildReservationContent(buyerName, items) {
     return text + suffix;
 }
 
-async function enqueueStatusNotifications(conn, shopping, status, actorName) {
+async function enqueueStatusNotifications(conn, shopping, status, actorName, reason) {
     const entries = [];
+    // Prazo de pagamento vencido: avisa o comprador e a empresa.
+    if (status === "cancelled" && reason === "expired") {
+        const users = new Set([String(shopping.id_user).toLowerCase(), ...shopping.items.map((item) => String(item.seller_id).toLowerCase())]);
+        for (const id_user of users) {
+            entries.push(await notificationOutbox.enqueue(conn, {
+                id_user,
+                type: "sistema",
+                title: "Reserva expirada",
+                content: "O prazo para pagamento venceu e a reserva foi cancelada. O material voltou a ficar disponível.",
+                reference_table: "shopping",
+                reference_id: shopping.id
+            }));
+        }
+        return entries;
+    }
     if (["accepted", "refused"].includes(status)) {
         const accepted = status === "accepted";
         entries.push(await notificationOutbox.enqueue(conn, {
             id_user: shopping.id_user,
             type: accepted ? "reserva_aceita" : "reserva_recusada",
             title: accepted ? "Reserva aceita" : "Reserva recusada",
-            content: `${actorName || "O vendedor"} ${accepted ? "aceitou" : "recusou"} a sua solicitação de reserva.`,
+            content: accepted && Number(shopping.value) > 0
+                ? `${actorName || "O vendedor"} aceitou a sua solicitação de reserva. Faça o pagamento para garantir o material.`
+                : `${actorName || "O vendedor"} ${accepted ? "aceitou" : "recusou"} a sua solicitação de reserva.`,
             reference_table: "shopping",
             reference_id: shopping.id
         }));
@@ -280,7 +297,7 @@ const shoppingService = {
     },
 
 
-    async updateStatus(id, newStatus, { onlyPending = false, notificationActorName } = {}) {
+    async updateStatus(id, newStatus, { onlyPending = false, allowedFrom = null, reason = null, notificationActorName } = {}) {
         let conn;
         let result;
         let entries = [];
@@ -310,10 +327,37 @@ const shoppingService = {
                 throw err;
             }
 
+            if (allowedFrom && !allowedFrom.includes(currentStatus)) {
+                const err = new Error(`Esta compra não pode mais ser cancelada. Status atual: "${currentStatus}".`);
+                err.status = 400;
+                throw err;
+            }
+
             if (["cancelled", "refused", "completed"].includes(currentStatus)) {
                 const err = new Error(`Esta compra já foi finalizada com status "${currentStatus}" e não pode ser alterada.`);
                 err.status = 400;
                 throw err;
+            }
+
+            // Aceite antes do pagamento: depois de pago (ou com Pix em andamento),
+            // a reserva não é mais recusada ou cancelada por aqui — o caminho é a disputa.
+            if (["cancelled", "refused"].includes(newStatus)) {
+                const [payments] = await conn.query(
+                    "SELECT status FROM payment WHERE id_shopping = ? AND status IN ('pending', 'approved') FOR UPDATE",
+                    [uuid.toBin(id)]
+                );
+
+                if (payments.some((payment) => payment.status === "approved")) {
+                    const err = new Error("Esta reserva já foi paga. Para desfazer a negociação, abra uma disputa.");
+                    err.status = 409;
+                    throw err;
+                }
+
+                if (payments.length > 0) {
+                    const err = new Error("Há um pagamento em andamento para esta reserva. Aguarde a confirmação ou o vencimento do Pix.");
+                    err.status = 409;
+                    throw err;
+                }
             }
 
             // Se a compra está sendo cancelada ou recusada, devolvemos o estoque dos produtos
@@ -338,18 +382,20 @@ const shoppingService = {
 
             const changed = currentStatus !== newStatus;
             if (changed) {
+                // accepted_in marca o início do prazo para pagamento.
                 await conn.query(
                     `UPDATE shopping
-                     SET status = ?
+                     SET status = ?,
+                         accepted_in = IF(? = 'accepted', NOW(), accepted_in)
                      WHERE id = ?`,
-                    [newStatus, uuid.toBin(id)]
+                    [newStatus, newStatus, uuid.toBin(id)]
                 );
             }
 
             // A resposta pertence a esta transição, não a uma alteração posterior.
             const shopping = await shoppingService.getShoppingById(id, conn);
             if (changed) {
-                entries = await enqueueStatusNotifications(conn, shopping, newStatus, notificationActorName);
+                entries = await enqueueStatusNotifications(conn, shopping, newStatus, notificationActorName, reason);
             }
             await conn.commit();
 
@@ -369,8 +415,80 @@ const shoppingService = {
         }
         await notificationOutbox.flush(entries);
         return result;
+    },
+
+    // Reservas aceitas e não pagas dentro do prazo voltam o material para o estoque.
+    // Doações (valor zero) não têm pagamento e não expiram.
+    async expireUnpaidReservations(hours = paymentDeadlineHours()) {
+        const [rows] = await connect.promise().query(
+            `SELECT BIN_TO_UUID(s.id) AS id
+             FROM shopping s
+             WHERE s.status = 'accepted'
+               AND s.value > 0
+               AND s.accepted_in IS NOT NULL
+               AND s.accepted_in < NOW() - INTERVAL ? HOUR
+               AND NOT EXISTS (
+                   SELECT 1 FROM payment p
+                   WHERE p.id_shopping = s.id AND p.status IN ('pending', 'approved')
+               )
+             LIMIT 100`,
+            [hours]
+        );
+
+        let expired = 0;
+        for (const row of rows) {
+            try {
+                const transition = await shoppingService.updateStatus(row.id, "cancelled", {
+                    allowedFrom: ["accepted"],
+                    reason: "expired"
+                });
+                if (transition && transition.changed) expired++;
+            } catch (error) {
+                // Pagamento iniciado no meio do caminho: a reserva continua.
+                if (error.status !== 409 && error.status !== 400) throw error;
+            }
+        }
+        return { checked: rows.length, expired };
     }
 
 };
 
+function paymentDeadlineHours() {
+    const hours = Number(process.env.RESERVATION_PAYMENT_HOURS || 48);
+    return Number.isFinite(hours) && hours > 0 ? hours : 48;
+}
+
+let expiryTimer = null;
+
+// Confere as reservas vencidas a cada 10 minutos (mesmo padrão do worker de notificações).
+function startReservationExpiryWorker(intervalMs = 10 * 60 * 1000) {
+    if (expiryTimer) return expiryTimer;
+    let running = false;
+    const tick = async () => {
+        if (running) return;
+        running = true;
+        try {
+            const result = await shoppingService.expireUnpaidReservations();
+            if (result.expired > 0) console.log("Reservas expiradas por falta de pagamento:", result);
+        } catch (error) {
+            // Banco indisponível não pode derrubar o processo.
+            console.error("Falha no worker de reservas:", error.code || error.message);
+        } finally {
+            running = false;
+        }
+    };
+    expiryTimer = setInterval(tick, intervalMs);
+    if (typeof expiryTimer.unref === "function") expiryTimer.unref();
+    tick();
+    return expiryTimer;
+}
+
+function stopReservationExpiryWorker() {
+    if (!expiryTimer) return;
+    clearInterval(expiryTimer);
+    expiryTimer = null;
+}
+
 module.exports = shoppingService;
+module.exports.startReservationExpiryWorker = startReservationExpiryWorker;
+module.exports.stopReservationExpiryWorker = stopReservationExpiryWorker;

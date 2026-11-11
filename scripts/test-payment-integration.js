@@ -248,10 +248,13 @@ async function check(name, fn) {
     passed++;
     console.log(`OK ${passed}: ${name}`);
 }
-async function shopping(items = [{ id_product: ids.product, quantity: 2 }]) {
+// Aceite antes do pagamento: a reserva criada já sai aceita pela empresa,
+// salvo quando o teste precisa dela aguardando aceite (accept = false).
+async function shopping(items = [{ id_product: ids.product, quantity: 2 }], accept = true) {
     const response = await request("POST", "/shopping/create", { items });
     assert.equal(response.status, 201);
     shoppingIds.push(response.body.shopping.id);
+    if (accept) await db.query("UPDATE shopping SET status = 'accepted', accepted_in = NOW() WHERE id = ?", [uuid.toBin(response.body.shopping.id)]);
     return response.body.shopping.id;
 }
 async function create(id, method = "pix", extra = {}) {
@@ -324,6 +327,37 @@ async function cleanup() {
         });
         const otherToken = jwt.sign({ id: ids.seller, role: "company" }, process.env.SECRET, { expiresIn: "5m" });
         const adminToken = jwt.sign({ id: ids.admin, role: "admin" }, process.env.SECRET, { expiresIn: "5m" });
+        await check("aceite antes do pagamento: reserva aguardando aceite não gera cobrança", async () => {
+            const id = await shopping(undefined, false);
+            const before = calls.create;
+            const response = await create(id);
+            assert.equal(response.status, 409);
+            assert.match(response.body.error, /ainda não aceitou/);
+            assert.equal(calls.create, before);
+            assert.equal((await request("GET", `/payment/shopping/${id}`)).body.length, 0);
+        });
+        await check("aceite antes do pagamento: comprador cancela reserva aceita e ainda não paga", async () => {
+            const id = await shopping();
+            const before = await stock();
+            const response = await request("PATCH", `/shopping/${id}/cancel`);
+            assert.equal(response.status, 200);
+            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "cancelled");
+            assert.equal(await stock(), before + 2);
+        });
+        await check("aceite antes do pagamento: reserva aceita e não paga no prazo expira e devolve o estoque", async () => {
+            const shoppingService = require("../src/services/shoppingService");
+            const id = await shopping();
+            const recent = await shopping();
+            const before = await stock();
+            await db.query("UPDATE shopping SET accepted_in = NOW() - INTERVAL 49 HOUR WHERE id = ?", [uuid.toBin(id)]);
+            await shoppingService.expireUnpaidReservations(48);
+            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "cancelled");
+            assert.equal((await request("GET", `/shopping/${recent}`)).body.status, "accepted");
+            assert.equal(await stock(), before + 2);
+            const [notices] = await db.query("SELECT title FROM notification WHERE reference_id = ? AND title = 'Reserva expirada'", [uuid.toBin(id)]);
+            assert.ok(notices.length >= 1, "Comprador e empresa devem ser avisados da expiração");
+            assert.equal((await request("PATCH", `/shopping/${recent}/cancel`)).status, 200);
+        });
         const firstShopping = await shopping();
         let first;
         await check("Pix usa valor do banco, gera PNG e salva IDs externos", async () => {
@@ -391,7 +425,9 @@ async function cleanup() {
             assert.equal(calls.refund, 1);
             assert.equal(await stock(), before + 2);
         });
-        await check("cancelamento confirmado e repetido devolve estoque uma vez", async () => {
+        await check("cancelar o Pix mantém a reserva aceita e o estoque reservado", async () => {
+            // Aceite antes do pagamento: cancelar a cobrança não desfaz a reserva aceita;
+            // o comprador pode pagar de novo até o prazo ou cancelar a reserva.
             const id = await shopping();
             const response = await create(id);
             const before = await stock();
@@ -400,7 +436,8 @@ async function cleanup() {
                 assert.equal(result.status, 200);
                 assert.equal(result.body.payment.status, "refused");
             }
-            assert.equal(await stock(), before + 2);
+            assert.equal(await stock(), before);
+            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "accepted");
             assert.equal(calls.cancel, 1);
         });
         await check("timeout após criar order recupera o mesmo ID sem duplicar", async () => {
@@ -527,21 +564,29 @@ async function cleanup() {
                 process.env.MERCADO_PAGO_ACCESS_TOKEN = previousToken;
             }
         });
-        await check("pagamento após cancelamento local exige revisão e reembolso não duplica estoque", async () => {
+        await check("reserva com Pix em andamento ou paga não é cancelada nem recusada; estorno devolve o estoque uma vez", async () => {
+            // Aceite antes do pagamento: com cobrança aberta ou paga, cancelar/recusar
+            // é bloqueado (evita pagamento caindo numa reserva já cancelada).
             const id = await shopping();
             const created = await create(id);
             const before = await stock();
-            assert.equal((await request("PATCH", `/shopping/${id}/cancel`)).status, 200);
+            const pendingCancel = await request("PATCH", `/shopping/${id}/cancel`);
+            assert.equal(pendingCancel.status, 409);
+            assert.match(pendingCancel.body.error, /pagamento em andamento/);
             approved(created.body.checkout.provider_order_id);
             const sync = await request("POST", `/payment/${created.body.payment.id}/sync`);
             assert.equal(sync.status, 200);
             assert.equal(sync.body.payment.status, "approved");
-            assert.equal(sync.body.checkout.needs_review, true);
-            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "cancelled");
-            assert.equal(await stock(), before + 2);
+            assert.equal(sync.body.checkout.needs_review, false);
+            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "accepted");
+            const refuse = await request("PATCH", `/shopping/${id}/status`, { status: "refused" }, otherToken);
+            assert.equal(refuse.status, 409);
+            assert.match(refuse.body.error, /já foi paga/);
+            assert.equal(await stock(), before);
             const refund = await request("POST", `/payment/${created.body.payment.id}/refund`, undefined, adminToken);
             assert.equal(refund.status, 200);
             assert.equal(refund.body.payment.status, "refunded");
+            assert.equal((await request("GET", `/shopping/${id}`)).body.status, "cancelled");
             assert.equal(await stock(), before + 2);
         });
         await check("comissão de 5% vem do banco e é preservada na repetição", async () => {
@@ -680,7 +725,7 @@ async function cleanup() {
                     assert.equal(synced.body.checkout.qr_code_base64, null);
                 }
                 assert.equal(calls.submit, submits);
-                assert.equal((await request("GET", `/shopping/${id}`)).body.status, "pending");
+                assert.equal((await request("GET", `/shopping/${id}`)).body.status, "accepted");
                 assert.equal(await stock(), before);
             }
         });
@@ -925,7 +970,7 @@ async function cleanup() {
                 assert.equal(declined.body.payment.status, "refused");
                 assert.equal(declined.body.checkout.status_detail, "cc_rejected_other_reason");
                 assert.equal(declined.body.checkout.qr_code, null);
-                assert.equal((await request("GET", `/shopping/${id}`)).body.status, "pending");
+                assert.equal((await request("GET", `/shopping/${id}`)).body.status, "accepted");
                 const [rows] = await db.query("SELECT value FROM commission WHERE id_payment=?", [uuid.toBin(declined.body.payment.id)]);
                 assert.equal(rows.length, 0);
                 const retried = await create(id, method, { token: "novo_card_token_ficticio" });
@@ -1020,7 +1065,7 @@ async function cleanup() {
             assert.equal((await create(id)).status, 409);
             for (let i = 0; i < 2; i++) assert.equal((await request("POST", `/payment/${created.body.payment.id}/cancel`)).body.payment.status, "refused");
             assert.equal(splitCalls.cancel, cancels + 1);
-            assert.equal(await stock(), before + 2);
+            assert.equal(await stock(), before);
             process.env.split_payment = "true";
         });
         await check("timeout no split recupera pagamento pela referência sem repetir POST", async () => {
@@ -1246,7 +1291,7 @@ async function cleanup() {
             assert.equal((await request("POST", route)).status, 503);
             assert.equal((await request("POST", route)).body.payment.status, "refused");
             assert.equal(splitCalls.cancel, cancels + 1);
-            assert.equal(await stock(), before + 2);
+            assert.equal(await stock(), before);
         });
         await check("chargeback e reembolso parcial exigem revisão sem rebaixar aprovação nem emitir novo estorno", async () => {
             for (const status of ["charged_back", "approved"]) {
@@ -1384,7 +1429,12 @@ async function cleanup() {
             const shoppingId = await shopping();
             const response = await create(shoppingId);
             const before = await stock();
-            assert.equal((await request("PATCH", `/shopping/${shoppingId}/cancel`)).status, 200);
+            // Aceite antes do pagamento: o cancelamento pela API é bloqueado com cobrança aberta.
+            assert.equal((await request("PATCH", `/shopping/${shoppingId}/cancel`)).status, 409);
+            // Simula uma reserva antiga cancelada antes da regra (com o estoque devolvido)
+            // para manter a cobertura da revisão de pagamento em reserva cancelada.
+            await db.query("UPDATE shopping SET status = 'cancelled' WHERE id = ?", [uuid.toBin(shoppingId)]);
+            await db.query("UPDATE product SET quantity = quantity + 2 WHERE id = ?", [uuid.toBin(ids.product)]);
             const external = splitRecord(response);
             external.status = "approved"; external.status_detail = "accredited";
             const synced = await request("POST", `/payment/${response.body.payment.id}/sync`);
