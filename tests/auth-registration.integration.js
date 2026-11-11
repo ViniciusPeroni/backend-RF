@@ -26,7 +26,7 @@ async function run(extra) {
         const schema = fs.readFileSync(path.join(root, 'src/mysql-init/RFScript.sql'), 'utf8').split('-- Admin padrão do sistema')[0].replace(/^DROP DATABASE[^\r\n]*;\r?$/m, '').replace(/Reaproveita_Franca/g, database);
         assert(!/DROP DATABASE|Reaproveita_Franca|INSERT INTO `user`/i.test(schema));
         await admin.query(schema);
-        Object.assign(process.env, local, { DB_NAME: database, NODE_ENV: 'test', SECRET: crypto.randomBytes(32).toString('hex'), DOCUMENT_ENC_KEY: crypto.randomBytes(32).toString('hex'), DOCUMENT_HMAC_KEY: crypto.randomBytes(32).toString('hex'), GOOGLE_CLIENT_ID: 'auth-test-client.apps.googleusercontent.com' });
+        Object.assign(process.env, local, { DB_NAME: database, NODE_ENV: 'test', SECRET: crypto.randomBytes(32).toString('hex'), DOCUMENT_ENC_KEY: crypto.randomBytes(32).toString('hex'), DOCUMENT_HMAC_KEY: crypto.randomBytes(32).toString('hex'), GOOGLE_CLIENT_ID: 'auth-test-client.apps.googleusercontent.com', NOTIFICATION_EMAIL_ENABLED: 'false', NOTIFICATION_PUSH_ENABLED: 'false' });
         require.cache[mailPath] = { id: mailPath, filename: mailPath, loaded: true, exports: async () => {} };
         google.prototype.verifyIdToken = async function ({ idToken, audience }) {
             assert.equal(audience, process.env.GOOGLE_CLIENT_ID);
