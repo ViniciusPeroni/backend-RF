@@ -2,7 +2,9 @@
 
 ## Estado das ferramentas
 
-O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto), `npm run test:notification`, `npm run test:card` e `npm run test:localization`. Os três scripts são integrações com MySQL, não uma suíte completa de testes. Há também um teste específico de pagamentos em `scripts/test-payment-integration.js`. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro. Não invente outros comandos de teste como `npm test`.
+O `package.json` define `npm start` (`node --watch src/server.js`), `npm run start:dev` (requer `nodemon` global, não declarado no projeto), `npm run test:notification`, `npm run test:card` e `npm run test:localization`. Os três scripts são integrações com MySQL, não uma suíte completa de testes. Há também um teste específico de pagamentos em `scripts/test-payment-integration.js`. Não há scripts/configuração de lint, typecheck ou build para o backend inteiro.
+
+A única suíte que roda sem banco é `npm run test:jest` (Jest, `--runInBand`), que exercita as controllers com `req`/`res` falsos e services mockados em `__tests__/`. Ela não substitui as integrações: não cobre middleware, SQL, Socket.IO real nem provedores externos. Não existe `npm test`.
 
 No PowerShell, somente em banco de desenvolvimento:
 
@@ -24,6 +26,19 @@ O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em c
 - Para acrescentar regressão de cartões/pagamentos/localização/logs no mesmo banco temporário: `$env:RF_NOTIFICATION_REGRESSION='1'` antes do comando acima. Pagamentos usam provedor interceptado, sem cobranças externas.
 - Não confundir resultados locais com envio/recebimento real: roteiro de configuração e validação em [notification-delivery.md](notification-delivery.md).
 - Na verificação desta etapa, 74 testes unitários e 349 integrações passaram (171 notificações, 52 cartões, 100 pagamentos, 26 localização). `npm audit` ainda aponta avisos nas dependências existentes, inclusive Nodemailer e a cadeia `node-pre-gyp`/`tar`; revisar antes de produção. Nenhum `audit fix` amplo foi aplicado.
+
+### Controllers: suíte Jest sem banco
+
+```powershell
+npm run test:jest
+```
+
+- `jest.config.js` usa `testEnvironment: node`, `testMatch` em `__tests__/**/*.test.js` e `setupFiles` com `__tests__/helpers/env.js` (SECRET e chaves de documento sintéticas, nenhuma credencial real).
+- `__tests__/helpers/http.js` monta `req`/`res` falsos (`invoke`, `serviceError`, `unexpectedError`), então nenhuma porta, conexão MySQL ou variável de ambiente de produção é necessária.
+- Um arquivo por controller em `src/controllers` (18 arquivos, 721 cenários na verificação desta etapa). Cada handler cobre sucesso, validação de entrada, erro de service com `status` e falha inesperada, além das regras de autorização/ownership decididas na própria controller.
+- `userController` e `otpController` mockam `src/db/connect` (`connect.promise()`); `notificationController` mocka `emitToUser`; os controllers de pagamento mockam os services e o provider. Nenhuma cobrança, e-mail, OTP ou requisição externa é disparada.
+- Aviso conhecido: com vários workers no Windows o Jest pode imprimir `A worker process has failed to exit gracefully` por causa do pool `mysql2` criado no require de `src/db/connect`. Com `--runInBand` o aviso não aparece e `--detectOpenHandles` não reporta handles pendentes.
+- O que ela **não** prova: contrato HTTP real, middleware `verifyJWT`/admin, SQL, persistência, Socket.IO e integração com provedores. Para isso continuam valendo as suítes de integração e as verificações HTTP manuais abaixo.
 
 ### JavaScript alterado
 
@@ -60,6 +75,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 | Verificação | O que sustenta | O que não sustenta |
 |---|---|---|
 | `node --check` | Sintaxe JS | Rota, SQL, auth ou comportamento |
+| `npm run test:jest` | Fluxo e respostas de cada handler de controller com services mockados | Middleware, SQL, persistência, Socket.IO e provedores externos |
 | Inicialização | Processo e carregamento inicial | Conectividade funcional de todos endpoints |
 | HTTP com banco | Cenário de rota exercitado | Outros cenários/clientes não testados |
 | Socket/integração externa | Apenas eventos/serviços efetivamente exercitados | Segurança ou disponibilidade fora dos cenários |

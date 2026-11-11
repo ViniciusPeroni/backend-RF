@@ -12,7 +12,8 @@
     "test:localization": "node tests/localization.integration.js",
     "test:log": "node --test test/logRoutes.test.js test/chatSocketAudit.test.js",
     "test:log:db": "node tests/log.integration.js",
-    "test:auth": "node tests/auth-registration.integration.js"
+    "test:auth": "node tests/auth-registration.integration.js",
+    "test:jest": "jest --runInBand"
   },
   "author": "Vinícius Peroni",
   "license": "ISC",
@@ -35,5 +36,8 @@
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",
     "uuid": "^11.0.0"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2"
   }
 }
