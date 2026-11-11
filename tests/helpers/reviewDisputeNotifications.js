@@ -277,14 +277,17 @@ async function runReviewDisputeNotificationTests({
             assert.strictEqual(rows[0].status, 'resolvida');
         } finally { notificationService.notifyUser = original; }
     });
-    await checkAsync('falha ao consultar destinatários não desfaz abertura confirmada', async () => {
+    await checkAsync('falha transacional ao consultar destinatários impede commit de disputa sem aviso durável', async () => {
+        const shoppingId = await makeShopping('pending', true);
         const original = disputeService.getNotificationRecipients;
         disputeService.getNotificationRecipients = async () => { throw new Error('Falha sintética na consulta de destinatários'); };
         try {
-            const dispute = await openDispute(false);
-            const [rows] = await connect.promise().query('SELECT status FROM dispute WHERE id = ?', [uuid.toBin(dispute.id)]);
-            assert.strictEqual(rows[0].status, 'aberta');
-            assert.strictEqual((await notices('dispute', dispute.id)).length, 0);
+            const response = await req('POST', '/api/reaproveitafranca/dispute/', tokens.buyer, {
+                type: 'outro', description: 'Fixture de rollback', id_shopping: shoppingId
+            });
+            statusIs(response, 500);
+            const [rows] = await connect.promise().query('SELECT id FROM dispute WHERE id_shopping = ?', [uuid.toBin(shoppingId)]);
+            assert.strictEqual(rows.length, 0);
         } finally { disputeService.getNotificationRecipients = original; }
     });
 }

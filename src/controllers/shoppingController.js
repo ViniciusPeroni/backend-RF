@@ -1,20 +1,7 @@
 const shoppingService = require("../services/shoppingService");
-const notificationService = require("../services/notificationService");
 const uuid = require("../utils/uuid");
 
 const VALID_STATUSES = ["pending", "accepted", "refused", "cancelled", "completed"];
-
-function buildReservationContent(buyerName, items) {
-    if (items.length === 1) {
-        return `${buyerName} solicitou ${items[0].quantity} unidade(s) de "${items[0].name}".`;
-    }
-
-    const details = items
-        .map((item) => `"${item.name}" (${item.quantity})`)
-        .join(", ");
-
-    return `${buyerName} solicitou ${items.length} itens: ${details}.`;
-}
 
 function getSellerIds(shopping) {
     return [...new Set(shopping.items.map((item) => String(item.seller_id).toLowerCase()))];
@@ -22,53 +9,6 @@ function getSellerIds(shopping) {
 
 function getActorName(req, fallback) {
     return req.role === "admin" ? "O administrador" : (req.userName || fallback);
-}
-
-async function notifyBuyerAboutStatus(shopping, status, actorName) {
-    const config = {
-        accepted: {
-            type: "reserva_aceita",
-            title: "Reserva aceita",
-            content: `${actorName} aceitou a sua solicitação de reserva.`
-        },
-        refused: {
-            type: "reserva_recusada",
-            title: "Reserva recusada",
-            content: `${actorName} recusou a sua solicitação de reserva.`
-        }
-    }[status];
-
-    if (!config) return;
-
-    try {
-        await notificationService.notifyUser({
-            id_user: shopping.id_user,
-            type: config.type,
-            title: config.title,
-            content: config.content,
-            reference_table: "shopping",
-            reference_id: shopping.id
-        });
-    } catch (notificationError) {
-        console.error("Erro ao notificar comprador sobre status da reserva:", notificationError);
-    }
-}
-
-async function notifySellersAboutCancellation(shopping, actorName) {
-    for (const sellerId of getSellerIds(shopping)) {
-        try {
-            await notificationService.notifyUser({
-                id_user: sellerId,
-                type: "sistema",
-                title: "Reserva cancelada",
-                content: `${actorName} cancelou a solicitação de reserva.`,
-                reference_table: "shopping",
-                reference_id: shopping.id
-            });
-        } catch (notificationError) {
-            console.error("Erro ao notificar vendedor sobre cancelamento:", notificationError);
-        }
-    }
 }
 
 const createShopping = async (req, res) => {
@@ -97,26 +37,7 @@ const createShopping = async (req, res) => {
             item.quantity = qty;
         }
 
-        const { shopping, sellers } = await shoppingService.createShopping(req.userId, items);
-
-        const buyerName = req.userName || "Um usuário";
-
-        // A compra já foi confirmada no banco. Falha ao notificar não deve
-        // desfazer a reserva nem impedir a resposta de sucesso.
-        for (const seller of sellers) {
-            try {
-                await notificationService.notifyUser({
-                    id_user: seller.id,
-                    type: "reserva_solicitada",
-                    title: "Nova solicitação de reserva",
-                    content: buildReservationContent(buyerName, seller.items),
-                    reference_table: "shopping",
-                    reference_id: shopping.id
-                });
-            } catch (notificationError) {
-                console.error("Erro ao notificar vendedor sobre reserva:", notificationError);
-            }
-        }
+        const { shopping } = await shoppingService.createShopping(req.userId, items, req.userName || "Um usuário");
 
         return res.status(201).json({
             message: "Compra registrada com sucesso.",
@@ -220,16 +141,16 @@ const cancelShopping = async (req, res) => {
             });
         }
 
-        const transition = await shoppingService.updateStatus(id, "cancelled", { onlyPending: true });
+        const transition = await shoppingService.updateStatus(id, "cancelled", {
+            onlyPending: true,
+            notificationActorName: getActorName(req, "O comprador")
+        });
 
         if (!transition) {
             return res.status(404).json({ error: "Compra não encontrada." });
         }
 
-        const { shopping: updated, changed } = transition;
-        if (changed) {
-            await notifySellersAboutCancellation(updated, getActorName(req, "O comprador"));
-        }
+        const { shopping: updated } = transition;
 
         return res.status(200).json({
             message: "Compra cancelada com sucesso. O estoque dos produtos foi restaurado.",
@@ -299,7 +220,9 @@ const updateStatus = async (req, res) => {
             }
         }
 
-        const transition = await shoppingService.updateStatus(id, status);
+        const transition = await shoppingService.updateStatus(id, status, {
+            notificationActorName: getActorName(req, status === "cancelled" ? "O comprador" : "O vendedor")
+        });
 
         if (!transition) {
             return res.status(404).json({
@@ -307,15 +230,7 @@ const updateStatus = async (req, res) => {
             });
         }
 
-        const { shopping: updated, changed } = transition;
-
-        if (["accepted", "refused"].includes(status) && changed) {
-            await notifyBuyerAboutStatus(updated, status, getActorName(req, "O vendedor"));
-        }
-
-        if (status === "cancelled" && changed) {
-            await notifySellersAboutCancellation(updated, getActorName(req, "O comprador"));
-        }
+        const { shopping: updated } = transition;
 
         return res.status(200).json({
             message: `Status da compra atualizado para "${status}".`,

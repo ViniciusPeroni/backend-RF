@@ -2,6 +2,7 @@ const axios = require('axios');
 const pool = require('../db/connect');
 const uuid = require('../utils/uuid');
 const imageType = require('../utils/imageType');
+const notificationOutbox = require('./notificationOutboxService');
 
 function failure(status, message) { const error = new Error(message); error.status = status; return error; }
 function assertActive(user) {
@@ -35,6 +36,7 @@ async function findOrCreateGoogleUser(payload, attempt = 0) {
         const [linked] = await connection.query(`SELECT ${projection} FROM \`user\` WHERE google_id = ? FOR UPDATE`, [payload.sub]);
         const [matching] = linked.length ? [linked] : await connection.query(`SELECT ${projection} FROM \`user\` WHERE email = ? FOR UPDATE`, [email]);
         let user = matching[0], created = false;
+        const notifications = [];
         if (user) {
             assertActive(user);
             if (!linked.length) {
@@ -65,10 +67,14 @@ async function findOrCreateGoogleUser(payload, attempt = 0) {
                 [uuid.toBin(id), name, email, photoBuffer, payload.sub]
             );
             user = { id, role: 'user', name, email, status: 'active' }; created = true;
+            notifications.push(await notificationOutbox.enqueue(connection, {
+                id_user: id, type: 'sistema', title: 'Bem-vindo(a) ao Reaproveita Franca',
+                content: 'Sua conta foi criada. Confirme seu e-mail para ativar a conta.'
+            }));
         }
         await connection.commit();
         const { google_id, photo, ...safeUser } = user;
-        return { user: safeUser, created };
+        return { user: safeUser, created, notifications };
     } catch (error) {
         await connection.rollback();
         if (['ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK'].includes(error.code) && attempt < 2) {

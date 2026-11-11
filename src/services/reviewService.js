@@ -1,6 +1,7 @@
 
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
+const notificationOutbox = require("./notificationOutboxService");
 
 const reviewService = {
 
@@ -12,87 +13,109 @@ const reviewService = {
     // duplicatas — o controller trata ER_DUP_ENTRY.
     // =========================================================
     async createReview(data) {
-
-        // 1. Verifica se a compra existe
-        const [shoppingRows] = await connect.promise().query(
-            `SELECT id, status FROM shopping WHERE id = ? LIMIT 1`,
-            [uuid.toBin(data.id_shopping)]
-        );
-
-        if (shoppingRows.length === 0) {
-            const error = new Error("Compra não encontrada.");
-            error.code = "SHOPPING_NOT_FOUND";
-            throw error;
-        }
-
-        if (shoppingRows[0].status !== "completed") {
-            const error = new Error("Somente compras com status 'completed' podem ser avaliadas.");
-            error.code = "REVIEW_NOT_ALLOWED";
-            throw error;
-        }
-
-        // 2. Verifica se o usuário avaliado realmente existe
-        const [userRows] = await connect.promise().query(
-            `SELECT id FROM \`user\` WHERE id = ? LIMIT 1`,
-            [uuid.toBin(data.id_reviewed)]
-        );
-
-        if (userRows.length === 0) {
-            const error = new Error("Usuário avaliado não encontrado.");
-            error.code = "USER_NOT_FOUND";
-            throw error;
-        }
-
-        // 3. Verifica se o avaliador e o avaliado participaram da compra como comprador e vendedor
-        const [partnership] = await connect.promise().query(
-            `SELECT 1
-             FROM shopping s
-             JOIN shopping_product sp ON sp.id_shopping = s.id
-             JOIN product p ON p.id = sp.id_product
-             WHERE s.id = ?
-               AND (
-                   (s.id_user = ? AND p.id_user = ?)
-                   OR (p.id_user = ? AND s.id_user = ?)
-               )
-             LIMIT 1`,
-            [
-                uuid.toBin(data.id_shopping),
-                uuid.toBin(data.id_reviewer),
-                uuid.toBin(data.id_reviewed),
-                uuid.toBin(data.id_reviewer),
-                uuid.toBin(data.id_reviewed)
-            ]
-        );
-
-        if (partnership.length === 0) {
-            const error = new Error(
-                "Usuários não possuem vínculo de compra e venda nesta transação."
+        const conn = await connect.promise().getConnection();
+        const entries = [];
+        let id;
+        try {
+            await conn.beginTransaction();
+            // 1. Verifica se a compra existe
+            const [shoppingRows] = await conn.query(
+                `SELECT id, status FROM shopping WHERE id = ? LIMIT 1`,
+                [uuid.toBin(data.id_shopping)]
             );
-            error.code = "REVIEW_NOT_ALLOWED";
+
+            if (shoppingRows.length === 0) {
+                const error = new Error("Compra não encontrada.");
+                error.code = "SHOPPING_NOT_FOUND";
+                throw error;
+            }
+
+            if (shoppingRows[0].status !== "completed") {
+                const error = new Error("Somente compras com status 'completed' podem ser avaliadas.");
+                error.code = "REVIEW_NOT_ALLOWED";
+                throw error;
+            }
+
+            // 2. Verifica se o usuário avaliado realmente existe
+            const [userRows] = await conn.query(
+                `SELECT id FROM \`user\` WHERE id = ? LIMIT 1`,
+                [uuid.toBin(data.id_reviewed)]
+            );
+
+            if (userRows.length === 0) {
+                const error = new Error("Usuário avaliado não encontrado.");
+                error.code = "USER_NOT_FOUND";
+                throw error;
+            }
+
+            // 3. Verifica o vínculo entre comprador e vendedor nesta compra
+            const [partnership] = await conn.query(
+                `SELECT 1
+                 FROM shopping s
+                 JOIN shopping_product sp ON sp.id_shopping = s.id
+                 JOIN product p ON p.id = sp.id_product
+                 WHERE s.id = ?
+                   AND (
+                       (s.id_user = ? AND p.id_user = ?)
+                       OR (p.id_user = ? AND s.id_user = ?)
+                   )
+                 LIMIT 1`,
+                [
+                    uuid.toBin(data.id_shopping),
+                    uuid.toBin(data.id_reviewer),
+                    uuid.toBin(data.id_reviewed),
+                    uuid.toBin(data.id_reviewer),
+                    uuid.toBin(data.id_reviewed)
+                ]
+            );
+
+            if (partnership.length === 0) {
+                const error = new Error(
+                    "Usuários não possuem vínculo de compra e venda nesta transação."
+                );
+                error.code = "REVIEW_NOT_ALLOWED";
+                throw error;
+            }
+
+            id = uuid.generateId();
+
+            await conn.query(
+                `INSERT INTO review (
+                    id,
+                    rating,
+                    comment,
+                    id_shopping,
+                    id_reviewer,
+                    id_reviewed
+                ) VALUES (?, ?, ?, ?, ?, ?)`,
+                [
+                    uuid.toBin(id),
+                    data.rating,
+                    data.comment ?? null,
+                    uuid.toBin(data.id_shopping),
+                    uuid.toBin(data.id_reviewer),
+                    uuid.toBin(data.id_reviewed)
+                ]
+            );
+
+            entries.push(await notificationOutbox.enqueue(conn, {
+                id_user: data.id_reviewed,
+                type: "nova_review",
+                title: "Nova avaliação recebida",
+                content: `Você recebeu uma avaliação de ${data.rating} estrela(s).`,
+                reference_table: "review",
+                reference_id: id
+            }));
+            await conn.commit();
+        } catch (error) {
+            try { await conn.rollback(); } catch (rollbackError) {
+                console.error("Falha no rollback da avaliação:", rollbackError.code || "ROLLBACK_FAILED");
+            }
             throw error;
+        } finally {
+            conn.release();
         }
-
-        const id = uuid.generateId();
-
-        await connect.promise().query(
-            `INSERT INTO review (
-                id,
-                rating,
-                comment,
-                id_shopping,
-                id_reviewer,
-                id_reviewed
-            ) VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-                uuid.toBin(id),
-                data.rating,
-                data.comment ?? null,
-                uuid.toBin(data.id_shopping),
-                uuid.toBin(data.id_reviewer),
-                uuid.toBin(data.id_reviewed)
-            ]
-        );
-
+        await notificationOutbox.flush(entries);
         return id;
     },
 

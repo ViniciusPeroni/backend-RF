@@ -1,6 +1,6 @@
 const otpService = require('../services/otpService');
 const connect = require('../db/connect');
-const notificationService = require('../services/notificationService');
+const notificationOutbox = require('../services/notificationOutboxService');
 const uuid = require('../utils/uuid');
 
 // Rate limit: 30s entre cada envio por usuário
@@ -58,27 +58,28 @@ const verifyCode = async (req, res) => {
         if (!id || !code) return res.status(400).json({ error: 'ID do usuário e código são obrigatórios.' });
         if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
 
-        const result = await otpService.verifyOtp(uuid.toBin(id), String(code));
-
-        if (!result.valid) {
-            return res.status(401).json({ error: result.motive });
-        }
-
-        await connect.promise().query(
-            `UPDATE user SET status = 'active' WHERE id = ?`,
-            [uuid.toBin(id)]
-        );
-
+        const conn = await connect.promise().getConnection();
+        let entry;
         try {
-            await notificationService.notifyUser({
+            await conn.beginTransaction();
+            const result = await otpService.verifyOtp(uuid.toBin(id), String(code), conn);
+            if (!result.valid) {
+                await conn.rollback();
+                return res.status(401).json({ error: result.motive });
+            }
+            await conn.query("UPDATE `user` SET status = 'active' WHERE id = ?", [uuid.toBin(id)]);
+            entry = await notificationOutbox.enqueue(conn, {
                 id_user: id,
                 type: 'sistema',
                 title: 'Conta ativada',
                 content: 'Seu e-mail foi confirmado e sua conta está ativa.'
             });
-        } catch (notifyError) {
-            console.error('Erro ao notificar ativação da conta:', notifyError);
-        }
+            await conn.commit();
+        } catch (error) {
+            await conn.rollback();
+            throw error;
+        } finally { conn.release(); }
+        await notificationOutbox.flush([entry]);
 
         return res.status(200).json({
             message: "Email confirmado! Faça seu login!"

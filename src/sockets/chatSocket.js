@@ -1,7 +1,6 @@
 const uuid = require('../utils/uuid');
 const messageService = require('../services/messageService');
 const conversationService = require('../services/conversationService');
-const notificationService = require('../services/notificationService');
 const { extractToken, getDecodedToken, getUserIdFromToken, userRoom } = require('./notificationSocket');
 
 function chatSocket(io) {
@@ -210,7 +209,8 @@ function chatSocket(io) {
                     id_user: userId,
                     type,
                     content,
-                    id_answer
+                    id_answer,
+                    senderName: socket.userName || "Usuário"
                 });
 
                 const message = {
@@ -231,26 +231,6 @@ function chatSocket(io) {
                 );
 
                 messageEmitter.emit("new_message", message);
-
-                const senderName = socket.userName || "Usuário";
-                const preview = type === "texto"
-                    ? String(content).trim().slice(0, 120)
-                    : `Enviou uma mensagem do tipo ${type}.`;
-
-                for (const recipient of recipients) {
-                    try {
-                        await notificationService.notifyUser({
-                            id_user: recipient,
-                            type: "nova_mensagem",
-                            title: `Nova mensagem de ${senderName}`.slice(0, 100),
-                            content: preview,
-                            reference_table: "conversation",
-                            reference_id: conversationId
-                        });
-                    } catch (notifyError) {
-                        console.error("Erro ao notificar nova mensagem:", notifyError);
-                    }
-                }
 
                 return respond({ message: "Mensagem enviada com sucesso.", id });
 

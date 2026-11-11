@@ -1,10 +1,62 @@
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
+const notificationOutbox = require("./notificationOutboxService");
+
+function buildReservationContent(buyerName, items) {
+    let content;
+    if (items.length === 1) {
+        content = `${buyerName} solicitou ${items[0].quantity} unidade(s) de "${items[0].name}".`;
+    } else {
+        const details = items.map((item) => `"${item.name}" (${item.quantity})`).join(", ");
+        content = `${buyerName} solicitou ${items.length} itens: ${details}.`;
+    }
+    if (Buffer.byteLength(content, 'utf8') <= 4096) return content;
+    const suffix = '… Consulte os itens da reserva.';
+    const budget = 4096 - Buffer.byteLength(suffix, 'utf8');
+    let text = '', bytes = 0;
+    for (const character of content) {
+        const size = Buffer.byteLength(character, 'utf8');
+        if (bytes + size > budget) break;
+        text += character;
+        bytes += size;
+    }
+    return text + suffix;
+}
+
+async function enqueueStatusNotifications(conn, shopping, status, actorName) {
+    const entries = [];
+    if (["accepted", "refused"].includes(status)) {
+        const accepted = status === "accepted";
+        entries.push(await notificationOutbox.enqueue(conn, {
+            id_user: shopping.id_user,
+            type: accepted ? "reserva_aceita" : "reserva_recusada",
+            title: accepted ? "Reserva aceita" : "Reserva recusada",
+            content: `${actorName || "O vendedor"} ${accepted ? "aceitou" : "recusou"} a sua solicitação de reserva.`,
+            reference_table: "shopping",
+            reference_id: shopping.id
+        }));
+    } else if (status === "cancelled") {
+        const sellerIds = new Set(shopping.items.map((item) => String(item.seller_id).toLowerCase()));
+        for (const id_user of sellerIds) {
+            entries.push(await notificationOutbox.enqueue(conn, {
+                id_user,
+                type: "sistema",
+                title: "Reserva cancelada",
+                content: `${actorName || "O comprador"} cancelou a solicitação de reserva.`,
+                reference_table: "shopping",
+                reference_id: shopping.id
+            }));
+        }
+    }
+    return entries;
+}
 
 const shoppingService = {
 
-    async createShopping(userId, items) {
+    async createShopping(userId, items, buyerName = "Um usuário") {
         let conn;
+        let result;
+        const entries = [];
         try {
             conn = await connect.promise().getConnection();
             await conn.beginTransaction();
@@ -118,9 +170,19 @@ const shoppingService = {
                 item.id = itemId;
             }
 
+            for (const [id_user, sellerItems] of sellers) {
+                entries.push(await notificationOutbox.enqueue(conn, {
+                    id_user,
+                    type: "reserva_solicitada",
+                    title: "Nova solicitação de reserva",
+                    content: buildReservationContent(buyerName, sellerItems),
+                    reference_table: "shopping",
+                    reference_id: shoppingId
+                }));
+            }
             await conn.commit();
 
-            return {
+            result = {
                 shopping: {
                     id: shoppingId,
                     value: totalValue,
@@ -142,6 +204,8 @@ const shoppingService = {
         } finally {
             if (conn) conn.release();
         }
+        await notificationOutbox.flush(entries);
+        return result;
     },
 
 
@@ -216,8 +280,10 @@ const shoppingService = {
     },
 
 
-    async updateStatus(id, newStatus, { onlyPending = false } = {}) {
+    async updateStatus(id, newStatus, { onlyPending = false, notificationActorName } = {}) {
         let conn;
+        let result;
+        let entries = [];
         try {
             conn = await connect.promise().getConnection();
             await conn.beginTransaction();
@@ -282,9 +348,12 @@ const shoppingService = {
 
             // A resposta pertence a esta transição, não a uma alteração posterior.
             const shopping = await shoppingService.getShoppingById(id, conn);
+            if (changed) {
+                entries = await enqueueStatusNotifications(conn, shopping, newStatus, notificationActorName);
+            }
             await conn.commit();
 
-            return { shopping, previousStatus: currentStatus, changed };
+            result = { shopping, previousStatus: currentStatus, changed };
 
         } catch (error) {
             if (conn) {
@@ -298,6 +367,8 @@ const shoppingService = {
         } finally {
             if (conn) conn.release();
         }
+        await notificationOutbox.flush(entries);
+        return result;
     }
 
 };

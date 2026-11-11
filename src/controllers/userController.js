@@ -8,7 +8,7 @@ const { OAuth2Client } = require("google-auth-library");
 const uuid = require('../utils/uuid');
 const doc = require('../services/docService');
 const loc = require('../services/localizationService');
-const notificationService = require('../services/notificationService');
+const notificationOutbox = require('../services/notificationOutboxService');
 const generatePassword = require('../utils/generateRandomPassword');
 const enviarCredenciaisAdmin = require('../utils/sendAdminCredentials');
 const enviarEmailReset = require('../utils/sendPasswordReset');
@@ -20,19 +20,13 @@ function isValidEmail(email) {
     return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-async function notifyWelcome(id_user, role) {
-    try {
-        await notificationService.notifyUser({
-            id_user,
-            type: 'sistema',
-            title: 'Bem-vindo(a) ao Reaproveita Franca',
-            content: role === 'company'
-                ? 'Sua empresa foi cadastrada. Confirme seu e-mail para ativar a conta.'
-                : 'Sua conta foi criada. Confirme seu e-mail para ativar a conta.'
-        });
-    } catch (error) {
-        console.error('Erro ao criar notificação de boas-vindas:', error);
-    }
+function welcomeNotification(id_user, role) {
+    return {
+        id_user, type: 'sistema', title: 'Bem-vindo(a) ao Reaproveita Franca',
+        content: role === 'company'
+            ? 'Sua empresa foi cadastrada. Confirme seu e-mail para ativar a conta.'
+            : 'Sua conta foi criada. Confirme seu e-mail para ativar a conta.'
+    };
 }
 
 const createUser = async (req, res) => {
@@ -67,6 +61,7 @@ const createUser = async (req, res) => {
     // MESMA conexão. Se qualquer um falhar, o ROLLBACK desfaz todos — sem órfãos.
     // O e-mail é enviado DEPOIS do commit, pois SMTP não tem rollback.
     let conn;
+    let welcome;
     try {
         conn = await connect.promise().getConnection();
         await conn.beginTransaction();
@@ -102,6 +97,7 @@ const createUser = async (req, res) => {
             state
         }, conn);
 
+        welcome = await notificationOutbox.enqueue(conn, welcomeNotification(id, role));
         await conn.commit();
     } catch (error) {
         if (conn) {
@@ -131,7 +127,7 @@ const createUser = async (req, res) => {
         emailSent = false;
     }
 
-    await notifyWelcome(id, role);
+    await notificationOutbox.flush([welcome]);
 
     return res.status(201).json({
         message: emailSent
@@ -174,6 +170,7 @@ const createCompany = async (req, res) => {
     // MESMA conexão. Se qualquer um falhar, o ROLLBACK desfaz todos — sem órfãos.
     // O e-mail é enviado DEPOIS do commit, pois SMTP não tem rollback.
     let conn;
+    let welcome;
     try {
         conn = await connect.promise().getConnection();
         await conn.beginTransaction();
@@ -210,6 +207,7 @@ const createCompany = async (req, res) => {
             state
         }, conn);
 
+        welcome = await notificationOutbox.enqueue(conn, welcomeNotification(id, role));
         await conn.commit();
     } catch (error) {
         if (conn) {
@@ -239,7 +237,7 @@ const createCompany = async (req, res) => {
         emailSent = false;
     }
 
-    await notifyWelcome(id, role);
+    await notificationOutbox.flush([welcome]);
 
     return res.status(201).json({
         message: emailSent
@@ -471,13 +469,22 @@ async function findOrCreateSocialUser({ provider, providerId, email, name }) {
         ? name.trim().slice(0, 100)
         : String(email).split('@')[0].slice(0, 100);
 
-    await connect.promise().query(
-        `INSERT INTO \`user\` (id, role, name, email, password, cellphone, status, \`${column}\`)
-         VALUES (?, 'user', ?, ?, NULL, NULL, 'active', ?)`,
-        [uuid.toBin(id), safeName, email, providerId]
-    );
-
-    await notifyWelcome(id, 'user');
+    const conn = await connect.promise().getConnection();
+    let welcome;
+    try {
+        await conn.beginTransaction();
+        await conn.query(
+            `INSERT INTO \`user\` (id, role, name, email, password, cellphone, status, \`${column}\`)
+             VALUES (?, 'user', ?, ?, NULL, NULL, 'active', ?)`,
+            [uuid.toBin(id), safeName, email, providerId]
+        );
+        welcome = await notificationOutbox.enqueue(conn, welcomeNotification(id, 'user'));
+        await conn.commit();
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally { conn.release(); }
+    await notificationOutbox.flush([welcome]);
 
     return { id, role: 'user', name: safeName, email, status: 'active', [column]: providerId };
 }
@@ -500,8 +507,8 @@ const loginGoogle = async (req, res) => {
     if (!payload || typeof payload.sub !== 'string' || !payload.sub || payload.sub.length > 255 || typeof payload.email !== 'string' || payload.email.length > 255 || !isValidEmail(payload.email.trim())) return res.status(401).json({ error: 'Token Google inválido.' });
     if (payload.email_verified !== true) return res.status(403).json({ error: 'E-mail do Google não verificado.' });
     try {
-        const { user, created } = await require('../services/googleLoginService').findOrCreateGoogleUser(payload);
-        if (created) await notifyWelcome(user.id, user.role);
+        const { user, notifications } = await require('../services/googleLoginService').findOrCreateGoogleUser(payload);
+        await notificationOutbox.flush(notifications || []);
         const token = issueSocialToken(user);
         return res.status(200).json({ message: 'Login com Google realizado com sucesso.', token, user, mustChangePassword: user.status === 'firstLogin' });
     } catch (error) {
