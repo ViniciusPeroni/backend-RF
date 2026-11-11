@@ -71,7 +71,7 @@ const productService = {
     },
 
 
-    async getProducts() {
+    async getProducts({ withPhotos = true } = {}) {
         const [rows] = await connect.promise().query(
             `SELECT
                 BIN_TO_UUID(id) AS id,
@@ -93,6 +93,11 @@ const productService = {
 
         if (rows.length === 0) {
             return [];
+        }
+
+        // Sem fotos: devolve a lista leve (as fotos são a maior parte do tamanho).
+        if (!withPhotos) {
+            return rows.map((product) => ({ ...product, photos: [] }));
         }
 
         const [photoRows] = await connect.promise().query(

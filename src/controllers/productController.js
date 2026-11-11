@@ -117,7 +117,8 @@ const createProduct = async (req, res) => {
 // LISTAR PRODUTOS
 const getProducts = async (req, res) => {
     try {
-        const products = await productService.getProducts();
+        // ?photos=none lista sem as fotos (bem mais leve), ex.: mapa de materiais.
+        const products = await productService.getProducts({ withPhotos: req.query.photos !== "none" });
 
         return res.status(200).json(products);
 
