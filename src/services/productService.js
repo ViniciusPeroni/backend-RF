@@ -242,12 +242,13 @@ const productService = {
     },
 
 
-    async deleteProduct(id, userId) {
-        const [result] = await connect.promise().query(
-            `DELETE FROM product
-             WHERE id = ? AND id_user = ?`,
-            [id, uuid.toBin(userId)]
-        );
+    async deleteProduct(id, userId, isAdmin = false) {
+        const query = isAdmin
+            ? `DELETE FROM product WHERE id = ?`
+            : `DELETE FROM product WHERE id = ? AND id_user = ?`;
+        const params = isAdmin ? [id] : [id, uuid.toBin(userId)];
+
+        const [result] = await connect.promise().query(query, params);
 
         return result.affectedRows > 0;
     },

@@ -253,10 +253,12 @@ const deleteProduct = async (req, res) => {
             });
         }
 
-        // Passa o ID do proprietário para a exclusão
+        // Se for admin, pode excluir qualquer produto; senão apenas o proprietário
+        const isAdmin = req.role === 'admin';
         const deleted = await productService.deleteProduct(
             uuid.toBin(id),
-            req.userId
+            req.userId,
+            isAdmin
         );
 
         if (!deleted) {
