@@ -34,6 +34,8 @@
 
 - Ainda em 11/11/2026, configurei o bloco de notificações no `.env` local (fora do Git): conta SMTP já usada pelo OTP, porta 465, canal de e-mail ativo e `NOTIFICATION_TOKEN_KEY` de 32 bytes. Uma notificação real foi aceita pelo Gmail e entregue à caixa do titular, sem envio a terceiros. Push continua desligado por falta de projeto/credencial/dispositivo; a fila em banco real segue sem validação externa porque o MySQL recusa as credenciais. Demais valores do `.env` preservados e backup fora do repositório.
 
+- Ainda em 11/11/2026, o banco do `.env` voltou a aceitar acesso: apliquei as migrações `notification_outbox`, `notification_retry` e `notification_channels` no MySQL local após `mysqldump` de segurança, e o `.env` recebeu as seis chaves exigidas pelo `dotenv-safe` (`DB_PORT`, `FRONTEND_URL`, `LINKEDIN_*` vazias e `AUDIT_LOG_READS=false`) que impediam a inicialização. Validei o pipeline real com usuário sintético: preferência opt-in, notificação criada, fila `pending`, worker `processed:1/delivered:1` e entrega `sent`, com remoção de todas as linhas ao final. A API iniciou e respondeu 401 sem JWT. Falta apenas FCM push (projeto/credencial/dispositivo) e integração web/mobile.
+
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.

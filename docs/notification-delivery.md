@@ -30,7 +30,7 @@ Aplicar uma vez e na ordem, com backup e ambiente confirmado:
 2. `src/mysql-init/migration_notification_outbox.sql` (campos de falha definitiva e lease).
 3. `src/mysql-init/migration_notification_channels.sql` (preferências, dispositivos e entregas).
 
-O `RFScript.sql` contém as estruturas para novos bancos, mas é destrutivo e **não deve ser executado em banco com dados**. Esta etapa não altera a `.env`, não aplica migrações no banco local existente e não movimenta dinheiro.
+O `RFScript.sql` contém as estruturas para novos bancos, mas é destrutivo e **não deve ser executado em banco com dados**. As três migrações foram aplicadas no MySQL local em 11/11/2026 (backup prévio em `mysqldump` fora do repositório); o mesmo procedimento precisa ser repetido no ambiente de produção. Nenhuma migração movimenta dinheiro.
 
 ## Critérios de liberação externa
 
@@ -81,5 +81,8 @@ Os testes não consultam provedores financeiros reais nem enviam e-mails/push ex
 - Dependências sem avisos: `npm audit` retorna zero após `bcrypt` 6.0.0, `nodemailer` 10.5.0, `mongoose` 7.8.13 e `follow-redirects` 1.16.3. `@mapbox/node-pre-gyp` e `tar` saíram da árvore.
 - Canal de e-mail exercitado com o Nodemailer 10 real e a conta SMTP já usada pelo OTP: uma notificação foi aceita pelo provedor (Gmail, TLS implícito na porta 465) e entregue à caixa do titular da conta. Nenhum terceiro recebeu mensagem.
 - `NOTIFICATION_TOKEN_KEY` gerada com 32 bytes aleatórios e gravada apenas no `.env` local (fora do Git); precisa ser preservada nos backups.
-- Pendente de validação externa: push FCM (sem projeto, credencial ou dispositivo de teste), pipeline completo pela fila em banco real (credenciais do MySQL recusadas) e clientes web/mobile.
+- Migrações `notification_retry`, `notification_outbox` e `notification_channels` aplicadas no MySQL local em 11/11/2026, com `mysqldump` gravado antes fora do repositório. O schema passou a ter `notification_preferences`, `notification_device`, `notification_delivery` e as colunas `failed_in`/`lease_id`.
+- Pipeline completo verificado no banco real com usuário sintético: preferência `email=true`, notificação criada, entrega `pending` na fila, `retryDeliveries` com `processed:1/delivered:1` e estado final `sent` com `attempts:1` e sem erro. O usuário e as linhas geradas foram removidos ao final (zero resíduos).
+- API reiniciada após as migrações: `Servidor rodando`, `Conexão realizada com MySQL` e rota autenticada respondendo 401 sem JWT.
+- Pendente de validação externa: push FCM (sem projeto, credencial ou dispositivo de teste) e clientes web/mobile. Repetir as migrações no ambiente de produção.
 
