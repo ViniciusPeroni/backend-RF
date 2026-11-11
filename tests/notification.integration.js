@@ -1327,7 +1327,9 @@ async function main() {
         await checkAsync('recusas simultâneas notificam e restauram estoque uma vez', () => runConcurrentStatus('refused'));
         await checkAsync('cancelamentos simultâneos notificam e restauram estoque uma vez', () => runConcurrentStatus('cancelled', 'cancel'));
 
-        await checkAsync('cancelamento revalida pending depois de uma alteração concorrente', async () => {
+        // Aceite antes do pagamento: reserva aceita e não paga pode ser cancelada,
+        // então a alteração concorrente usada aqui é a recusa (status final).
+        await checkAsync('cancelamento revalida o status depois de uma alteração concorrente', async () => {
             const created = await req('POST', '/api/reaproveitafranca/shopping/create', tokenA, {
                 items: [{ id_product: productB2Id, quantity: 1 }]
             });
@@ -1340,15 +1342,15 @@ async function main() {
                 const shopping = await originalGet(...args);
                 if (args[0] === id && !intervened) {
                     intervened = true;
-                    await shoppingService.updateStatus(id, 'accepted');
+                    await shoppingService.updateStatus(id, 'refused');
                 }
                 return shopping;
             };
             try {
                 const response = await req('PATCH', `/api/reaproveitafranca/shopping/${id}/cancel`, tokenA);
-                assertStatus(response, 400, 'cancelamento após aceite');
+                assertStatus(response, 400, 'cancelamento após recusa');
                 const shopping = await originalGet(id);
-                assert.strictEqual(shopping.status, 'accepted');
+                assert.strictEqual(shopping.status, 'refused');
                 const notifications = (await listNotifications(sellerBId, 'sistema')).filter((n) => n.reference_id === id);
                 assert.strictEqual(notifications.length, 0);
             } finally {
