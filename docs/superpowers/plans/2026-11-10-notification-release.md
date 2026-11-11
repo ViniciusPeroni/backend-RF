@@ -9,7 +9,7 @@
 - [x] Registrar compatibilidade de hash bcrypt anterior e transporte CommonJS com testes sem rede.
 - [x] Corrigir dependências auditadas, evitando `npm audit fix --force` ou alterações de regras de autenticação.
 - [x] Verificar audit, unitários e regressões HTTP/MySQL em instância descartável; revisar diff.
-- [ ] Registrar evidências e bloqueios de credenciais/dispositivos/autorização de clientes. Não mover card para DONE sem validação externa.
+- [x] Registrar evidências e bloqueios de credenciais/dispositivos/autorização de clientes. Não mover card para DONE sem validação externa.
 
 ## Evidências
 
@@ -18,11 +18,12 @@
 - Nodemailer 10 mantém `createTransport`, o gancho `getSocket` e `close()`; exige Node 20+ e o projeto usa Node 22+.
 - Suítes após o upgrade: 74 unitários de notificação, 29 de `test/`, 15 de `test:log`, 370 integrações em MySQL descartável (171 notificações, 52 cartões, 100 pagamentos interceptados, 26 localização, 21 logs) e 3 grupos de autenticação.
 - SMTP: sonda descartável com servidor local sem STARTTLS exercitou o Nodemailer 10 real pelo gancho `getSocket` (uma conexão, EHLO enviado) e o erro foi classificado como `SMTP_TRANSIENT` não terminal, como esperado para retry. Não houve entrega externa real.
+- E-mail real (11/11/2026): com `smtp.gmail.com:465` e a conta já usada pelo OTP, `sendEmail` foi aceito pelo provedor e entregue à caixa do titular. Configuração equivalente gravada no `.env` local com `NOTIFICATION_EMAIL_ENABLED=true` e `NOTIFICATION_TOKEN_KEY` de 64 hexadecimais. Push permanece desligado.
 
 ## Bloqueios externos
 
 - Banco de destino recusa as credenciais configuradas: migrações de retry/outbox/canais não podem ser aplicadas sem senha válida e autorização.
-- `FCM_PROJECT_ID`, credenciais do Google e `NOTIFICATION_TOKEN_KEY` ausentes; SMTP dedicado não configurado (`NOTIFICATION_SMTP_*`). Sem isso não há entrega real de e-mail/push.
+- `FCM_PROJECT_ID`, credenciais do Google e dispositivo de teste ausentes: push e app fechado seguem sem prova real.
 - Integração e validação em `FrontEnd-RF/` e `Mobile-RF/` dependem de autorização nos projetos irmãos.
 
 ## Limites

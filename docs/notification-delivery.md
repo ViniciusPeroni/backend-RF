@@ -75,3 +75,11 @@ Sem essas evidências não é correto marcar o módulo como validado em produç�
 `npm run test:notification:unit` não exige banco nem credenciais. `RF_TEST_ALLOW_DB=1 npm run test:notification` cria/remove banco descartável e exercita migrações, HTTP, Socket.IO e filas; os transportes SMTP/FCM são substituídos por interceptações. `RF_NOTIFICATION_REGRESSION=1` acrescenta cartões, pagamentos interceptados, localização e logs no mesmo banco temporário. Nunca usar `NODE_ENV=production`.
 
 Os testes não consultam provedores financeiros reais nem enviam e-mails/push externos. Migrações e configurações do banco existente continuam sem alteração até uma execução operacional autorizada.
+
+## Estado verificado em 11/11/2026
+
+- Dependências sem avisos: `npm audit` retorna zero após `bcrypt` 6.0.0, `nodemailer` 10.5.0, `mongoose` 7.8.13 e `follow-redirects` 1.16.3. `@mapbox/node-pre-gyp` e `tar` saíram da árvore.
+- Canal de e-mail exercitado com o Nodemailer 10 real e a conta SMTP já usada pelo OTP: uma notificação foi aceita pelo provedor (Gmail, TLS implícito na porta 465) e entregue à caixa do titular da conta. Nenhum terceiro recebeu mensagem.
+- `NOTIFICATION_TOKEN_KEY` gerada com 32 bytes aleatórios e gravada apenas no `.env` local (fora do Git); precisa ser preservada nos backups.
+- Pendente de validação externa: push FCM (sem projeto, credencial ou dispositivo de teste), pipeline completo pela fila em banco real (credenciais do MySQL recusadas) e clientes web/mobile.
+
