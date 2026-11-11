@@ -19,6 +19,7 @@ Documentação operacional e técnica da API do Reaproveita Franca. Ela descreve
 | Alterar textos, UUIDs, datas ou formatos | [localization.md](localization.md) |
 | Planejar ou verificar uma funcionalidade | [feature-readiness.md](feature-readiness.md), [quality.md](quality.md) |
 | Integrar notificações em outro fluxo | [notification-integration.md](notification-integration.md) |
+| Configurar canais e liberar notificações | [notification-delivery.md](notification-delivery.md) |
 | Executar uma tarefa como agente | [agent-workflow.md](agent-workflow.md) |
 | Entender o escopo real do produto | [product.md](product.md) |
 | Registrar decisão técnica duradoura | [decisions.md](decisions.md), [adr/README.md](adr/README.md) |

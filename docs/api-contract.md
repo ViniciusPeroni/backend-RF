@@ -68,6 +68,9 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | notification | `GET /notification/:id` | JWT | Consulta a notificação do próprio usuário; não pertencente/inexistente retorna 404 |
 | notification | `PATCH /notification/:id/read` | JWT | Marca como lida e define `read_in` |
 | notification | `DELETE /notification/:id` | JWT | Exclui somente notificação do usuário autenticado |
+| notification | `GET/PUT /notification/preferences` | JWT | Preferências opt-in `email` e `push`, booleanos; padrão false; PUT exige ambos e recusa campos extras |
+| notification | `PUT /notification/devices/:id` | JWT | Registra/rotaciona token FCM para o próprio usuário; body `{ token, platform }`, até dez dispositivos; sem token na resposta; conflito de vínculo retorna 409 |
+| notification | `DELETE /notification/devices/:id` | JWT | Desvincula dispositivo próprio, cancela pendências; 204 ou 404; não aceita corpo |
 
 Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não derive contrato detalhado apenas desta tabela.
 
