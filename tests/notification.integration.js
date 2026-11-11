@@ -610,16 +610,25 @@ async function main() {
         // Fila de retry persistida
         // =================================================================
         const failNotificationInsert = () => {
-            const originalQuery = connect.query;
-            connect.query = function (sql) {
+            const originalPromise = connect.promise;
+            const pool = originalPromise.call(connect);
+            const rejectInsert = (sql) => {
                 if (typeof sql === 'string' && /INSERT\s+INTO\s+notification\s*\(/i.test(sql)) {
                     const error = new Error('falha sintética de persistência');
                     error.code = 'ER_LOCK_WAIT_TIMEOUT';
                     throw error;
                 }
-                return originalQuery.apply(this, arguments);
             };
-            return () => { connect.query = originalQuery; };
+            connect.promise = () => ({
+                query: async (...args) => { rejectInsert(args[0]); return pool.query(...args); },
+                getConnection: async () => {
+                    const conn = await pool.getConnection();
+                    const query = conn.query.bind(conn);
+                    conn.query = async (...args) => { rejectInsert(args[0]); return query(...args); };
+                    return conn;
+                }
+            });
+            return () => { connect.promise = originalPromise; };
         };
 
         await checkAsync('falha de persistência enfileira retry e o worker entrega com o mesmo id', async () => {
@@ -711,7 +720,7 @@ async function main() {
             assert.strictEqual(emissionsAfter, emissionsBefore + 1, 'retry não reemitiu');
         });
 
-        await checkAsync('retry descarta a linha após o máximo de tentativas', async () => {
+        await checkAsync('retry preserva falha definitiva para revisão após o máximo de tentativas', async () => {
             const title = `Retry descarte ${suffix}`;
             const retryId = uuid.generateId();
             await connect.promise().query(
@@ -731,10 +740,10 @@ async function main() {
             }
 
             const [retryRows] = await connect.promise().query(
-                'SELECT COUNT(*) AS total FROM notification_retry WHERE id = ?',
+                'SELECT COUNT(*) AS total FROM notification_retry WHERE id = ? AND failed_in IS NOT NULL',
                 [uuid.toBin(retryId)]
             );
-            assert.strictEqual(Number(retryRows[0].total), 0, 'linha descartada deveria sumir');
+            assert.strictEqual(Number(retryRows[0].total), 1, 'falha definitiva precisa permanecer auditável');
             const [notifications] = await connect.promise().query(
                 'SELECT COUNT(*) AS total FROM notification WHERE id = ?',
                 [uuid.toBin(retryId)]
@@ -1462,6 +1471,13 @@ async function main() {
             users: { buyerId, sellerBId, sellerCId, adminId, outsiderId: otpUserId },
             tokens: { buyer: tokenA, sellerB: tokenB, sellerC: tokenC, admin: adminToken },
             products: { productB1Id, productB2Id, productC1Id }
+        });
+
+        await require('./helpers/notificationOutbox').runNotificationOutboxTests({
+            db: connect.promise(), buyerId, checkAsync
+        });
+        await require('./helpers/notificationChannels').runNotificationChannelTests({
+            req, checkAsync, buyerId, tokenA, tokenB, db: connect.promise(), uuid
         });
 
     } catch (error) {

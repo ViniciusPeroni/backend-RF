@@ -7,6 +7,7 @@
     "start": "node --watch src/server.js",
     "start:dev": "nodemon src/server.js",
     "test:notification": "node scripts/test-notification-suite.js",
+    "test:notification:unit": "node --test tests/notification-outbox.unit.js tests/notification-account-outbox.unit.js tests/notification-domain-outbox.unit.js tests/notification-channels.unit.js tests/payment-notification-outbox.test.js",
     "test:card": "node tests/card.integration.js",
     "test:localization": "node tests/localization.integration.js"
   },
