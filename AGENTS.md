@@ -17,6 +17,8 @@
 - Em 09/11/2026 Bryan autorizou fechar as lacunas de notificação na branch `feature/pedro/NotificationHardening`: paginação/filtros na listagem, expiração de JWT no Socket.IO e fila de retry persistida com worker, além da suíte em banco temporário. A suíte de notificação passou 150 cenários e cartões 52; a migração `migration_notification_retry.sql` é aditiva. Nada foi commitado ou publicado sem nova autorização. Push/e-mail e aviso de pagamento recusado/estornado continuam fora por falta de provedor/decisão de produto.
 - Em 10/11/2026 o usuário autorizou concluir as lacunas de notificações e delegou escolhas técnicas (“sla só faz”). Implementados: outbox transacional nos gatilhos existentes (somente hooks de notificação nos demais módulos), política `sistema` para recusa (comprador) e estorno (comprador/vendedores/admins ativos), SMTP e FCM opt-in, dispositivos criptografados e preferências autenticadas. Verificação: 74 unitários e 349 integrações (171 notificações, 52 cartões, 100 pagamentos, 26 localização), sem falhas. A instância MySQL temporária foi encerrada; `.env` e banco local existente preservados. Nenhum merge, envio a pessoas reais ou edição web/mobile autorizado nesta etapa. Migrações de outbox/canais ainda não aplicadas no banco de destino. Contrato e dependências externas em `docs/notification-delivery.md`; auditoria de dependências ainda tem avisos. Não usar testes interceptados como comprovação de recebimento externo.
 
+- Em 10/11/2026, a pedido do responsável pela branch `feature/pedro/controllerLog`, foi autorizado concluir o módulo de logs: CRUD com JWT de administrador, validação/paginação, migração aditiva `migration_log_audit.sql`, auditoria automática de escrita HTTP (`auditLog`) e de eventos de Socket.IO (`auditService`), com leitura auditável via `AUDIT_LOG_READS`. Não foram alteradas regras de login Google/LinkedIn nem de outros domínios. Verificação: `npm run test:log` (15 cenários) e suíte `test/*.test.js` (29 cenários) sem banco; `npm run test:log:db` passou 21 cenários em MySQL real e removeu os dados sintéticos; schema local contém colunas, índices e FK da migração. Contrato em `docs/logs.md`.
+
 - Responda sempre em português brasileiro, inclusive perguntas e relatórios.
 - Não crie, altere ou exclua arquivos de código sem autorização explícita de Bryan para a alteração solicitada. Por padrão, apenas oriente, leia e revise o código. A única exceção é o arquivo `AGENTS.md`, que pode ser atualizado. Pedidos de orientação ou de execução de testes não autorizam alterações no código; testes e operações no banco devem respeitar o escopo autorizado.
 - Não faça commit nem push sem autorização explícita. Não edite os projetos irmãos `FrontEnd-RF/` e `Mobile-RF/` em tarefas restritas ao backend.
@@ -26,11 +28,13 @@
 
 ## Orientação rápida
 
+- Na integração por PR de notificações com a `main` atualizada em 10/11/2026, preservar as restrições de OTP (seis dígitos, somente `awaitingForEmail`), identidade Google validada e conta empresa, a auditoria HTTP/socket e a outbox transacional. O cadastro Google de empresa também usa o envelope já enfileirado, sem segundo aviso. Verificação do resultado combinado: 74 unitários de notificação, 29 de `test/`, 370 cenários DB (171 notificação, 52 cartão, 100 pagamento interceptado, 26 localização, 21 logs) e os três grupos de autenticação em banco temporário. Migrações produtivas e provedores externos continuam sem validação nesta operação.
+
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
 - Há teste específico de pagamentos em `scripts/test-payment-integration.js`, com MySQL real e transporte externo interceptado; exige `RUN_PAYMENT_DB_TESTS=1`, nunca produção. Não há suíte geral, lint, typecheck ou build. Use `node --check` para sintaxe; configuração e cURLs em `docs/payments.md`.
-- Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. `test:notification` usa `scripts/test-notification-suite.js`, que cria e remove um banco temporário; os demais exigem banco de desenvolvimento. São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
+- Também existem `npm run test:notification`, `npm run test:card` e `npm run test:localization`, que exigem `RF_TEST_ALLOW_DB=1` e MySQL de desenvolvimento. `test:notification` usa `scripts/test-notification-suite.js`, que cria e remove um banco temporário; os demais exigem banco de desenvolvimento. `npm run test:log` valida rotas, auditoria HTTP e socket com services mockados, sem banco; `npm run test:log:db` faz integração real (também exige `RF_TEST_ALLOW_DB=1`). São coberturas parciais; use `node --check` para sintaxe e testes HTTP reais quando o ambiente permitir.
 - No merge da `main` de 07/11/2026, Bryan escolheu manter este módulo de pagamentos (Pix/cartão com split, variáveis `MERCADO_PAGO_*`). O Checkout Pro da `main` (`MP_*`, `mercadoPagoService`, `paymentWebhookService` e seus testes) ficou fora.
 
 ## Fluxo de trabalho do agente
@@ -56,11 +60,11 @@
 - `src/server.js` fixa CORS em `http://localhost:3000`.
 - `src/index.js` requer `./db/testconnect`, com a mesma caixa do arquivo, e confia apenas no proxy local. O túnel deve encaminhar para `http://127.0.0.1:5000` (ou `PORT`), sem depender do IP do Wi-Fi.
 - O cron está desativado e `src/cron.js` referencia `cleanUpMessages`, que não existe.
-- As camadas de autorização de compras, itens de compra, documentos, logs, localização e propriedade de produto têm lacunas descritas em [`docs/security-privacy.md`](docs/security-privacy.md). Não as amplie inadvertidamente.
+- As camadas de autorização de compras, itens de compra, documentos, localização e propriedade de produto têm lacunas descritas em [`docs/security-privacy.md`](docs/security-privacy.md). Logs foram resolvidos: `/log/*` exige JWT + admin e a escrita é auditada automaticamente por `src/middlewares/auditLog.js`.
 
 ## Banco, autenticação e dados
 
-- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, as de pagamento (`migration_payment_*.sql`) e `migration_localization_coordinates.sql`. `migration_mercado_pago*.sql` vieram com o Checkout Pro da `main`, que não é usado nesta branch. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
+- Schema: `src/mysql-init/RFScript.sql`; migrações manuais: `migration_social_login.sql`, as de pagamento (`migration_payment_*.sql`), `migration_localization_coordinates.sql` e `migration_log_audit.sql`. `migration_mercado_pago*.sql` vieram com o Checkout Pro da `main`, que não é usado nesta branch. Não há framework de migração; aplique migrações existentes uma vez, sem executar o schema destrutivo em dados importantes.
 - Em 07/11/2026 o banco local recebeu `localization.latitude`/`longitude` pela migração de coordenadas. Reconfirme o schema antes da integração mobile.
 - PKs UUIDv7 são `BINARY(16)`: use `src/utils/uuid.js` para conversão e `BIN_TO_UUID()` nas consultas de leitura. Nunca passe UUID string diretamente à coluna binária.
 - Use crases para palavras reservadas SQL, especialmente `user`, `table` e `read`.
@@ -74,4 +78,5 @@
 - Contrato observado: [`docs/api-contract.md`](docs/api-contract.md); arquitetura: [`docs/architecture.md`](docs/architecture.md).
 - Fluxo de agentes e evidências: [`docs/agent-workflow.md`](docs/agent-workflow.md), [`docs/feature-readiness.md`](docs/feature-readiness.md), [`docs/quality.md`](docs/quality.md).
 - Segurança, produto, localização, integração e decisões: consulte os links no índice.
+- Auditoria: contrato, tabela, middleware e Socket.IO em [`docs/logs.md`](docs/logs.md).
 - Ao mudar comportamento confirmado, atualize os documentos afetados. Preserve desconhecidos como desconhecidos e não documente credenciais ou dados pessoais.

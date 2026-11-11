@@ -1,7 +1,21 @@
 const uuid = require('../utils/uuid');
 const messageService = require('../services/messageService');
 const conversationService = require('../services/conversationService');
+const { recordAudit, isReadAuditEnabled } = require('../services/auditService');
 const { extractToken, getDecodedToken, getUserIdFromToken, userRoom } = require('./notificationSocket');
+
+// Auditoria de Socket.IO não passa pelo middleware HTTP; registra o evento
+// sem bloquear a resposta e sem persistir conteúdo de mensagem.
+function auditSocket(socket, userId, data) {
+    const handshake = socket.handshake || {};
+
+    return recordAudit({
+        id_user: userId || socket.userId,
+        ip: handshake.address,
+        user_agent: handshake.headers && handshake.headers['user-agent'],
+        ...data
+    });
+}
 
 function chatSocket(io) {
 
@@ -73,9 +87,26 @@ function chatSocket(io) {
                 }
 
                 const result = await conversationService.getOrCreateConversation(userId, otherUserId);
+
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: result.created ? 'create' : 'other',
+                    table: 'conversation',
+                    reference_id: result.conversationId,
+                    description: `socket get_or_create_conversation -> ${result.created ? 'criada' : 'existente'}`
+                });
+
                 return respond(result);
             } catch (error) {
                 console.error("Erro em get_or_create_conversation:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'create',
+                    table: 'conversation',
+                    description: 'socket get_or_create_conversation -> erro'
+                });
+
                 if (error.status) {
                     return respond({ error: error.message });
                 }
@@ -94,6 +125,16 @@ function chatSocket(io) {
                 }
 
                 const conversations = await conversationService.listConversationsForUser(userId);
+
+                if (isReadAuditEnabled()) {
+                    auditSocket(socket, userId, {
+                        status: 'sucesso',
+                        operation: 'read',
+                        table: 'conversation',
+                        description: 'socket load_conversations'
+                    });
+                }
+
                 return respond({ conversations });
             } catch (error) {
                 console.error("Erro em load_conversations:", error);
@@ -126,6 +167,16 @@ function chatSocket(io) {
                     limit,
                     before
                 });
+
+                if (isReadAuditEnabled()) {
+                    auditSocket(socket, userId, {
+                        status: 'sucesso',
+                        operation: 'read',
+                        table: 'message',
+                        reference_id: String(conversationId),
+                        description: 'socket load_messages'
+                    });
+                }
 
                 return respond({ messages });
             } catch (error) {
@@ -163,9 +214,25 @@ function chatSocket(io) {
                     upToMessageId
                 });
 
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: 'update',
+                    table: 'message',
+                    reference_id: String(conversationId),
+                    description: 'socket mark_read'
+                });
+
                 return respond(result);
             } catch (error) {
                 console.error("Erro em mark_read:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'update',
+                    table: 'message',
+                    description: 'socket mark_read -> erro'
+                });
+
                 if (error.status) {
                     return respond({ error: error.message });
                 }
@@ -213,6 +280,14 @@ function chatSocket(io) {
                     senderName: socket.userName || "Usuário"
                 });
 
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: 'create',
+                    table: 'message',
+                    reference_id: id,
+                    description: `socket send_message -> tipo ${type}`
+                });
+
                 const message = {
                     id,
                     type,
@@ -236,6 +311,13 @@ function chatSocket(io) {
 
             } catch (error) {
                 console.error("Erro em send_message:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'create',
+                    table: 'message',
+                    description: 'socket send_message -> erro'
+                });
 
                 if (error.status) {
                     return respond({ error: error.message });
@@ -271,6 +353,14 @@ function chatSocket(io) {
                     content
                 });
 
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: 'update',
+                    table: 'message',
+                    reference_id: messageId,
+                    description: 'socket edit_message'
+                });
+
                 io.to(String(result.id_conversation)).emit("message_edited", {
                     id: result.id,
                     id_conversation: result.id_conversation,
@@ -281,6 +371,14 @@ function chatSocket(io) {
                 return respond({ message: "Mensagem editada com sucesso.", ...result });
             } catch (error) {
                 console.error("Erro em edit_message:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'update',
+                    table: 'message',
+                    description: 'socket edit_message -> erro'
+                });
+
                 if (error.status) {
                     return respond({ error: error.message });
                 }
@@ -309,6 +407,14 @@ function chatSocket(io) {
                     userId
                 });
 
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: 'delete',
+                    table: 'message',
+                    reference_id: messageId,
+                    description: 'socket delete_message'
+                });
+
                 io.to(String(result.id_conversation)).emit("message_deleted", {
                     id: result.id,
                     id_conversation: result.id_conversation,
@@ -318,6 +424,14 @@ function chatSocket(io) {
                 return respond({ message: "Mensagem excluída com sucesso.", ...result });
             } catch (error) {
                 console.error("Erro em delete_message:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'delete',
+                    table: 'message',
+                    description: 'socket delete_message -> erro'
+                });
+
                 if (error.status) {
                     return respond({ error: error.message });
                 }
@@ -344,9 +458,25 @@ function chatSocket(io) {
                 const result = await conversationService.leaveConversation(String(conversationId), userId);
                 socket.leave(String(conversationId));
 
+                auditSocket(socket, userId, {
+                    status: 'sucesso',
+                    operation: 'delete',
+                    table: 'conversation',
+                    reference_id: String(conversationId),
+                    description: 'socket leave_conversation'
+                });
+
                 return respond({ message: "Você saiu da conversa.", ...result });
             } catch (error) {
                 console.error("Erro em leave_conversation:", error);
+
+                auditSocket(socket, socket.userId, {
+                    status: 'falha',
+                    operation: 'delete',
+                    table: 'conversation',
+                    description: 'socket leave_conversation -> erro'
+                });
+
                 if (error.status) {
                     return respond({ error: error.message });
                 }

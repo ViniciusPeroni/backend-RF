@@ -1,4 +1,9 @@
 const router = require("express").Router();
+const auditLog = require("../middlewares/auditLog");
+
+// Registra automaticamente toda operação de escrita (POST/PUT/PATCH/DELETE)
+// na tabela `log`. Não persiste corpo, headers nem tokens.
+router.use(auditLog);
 
 router.use("/user", require("./modules/userRoutes"));
 router.use("/localization", require("./modules/localizationRoutes"));

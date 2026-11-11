@@ -72,6 +72,6 @@ Sem essas evidências não é correto marcar o módulo como validado em produç�
 
 ## Verificação local
 
-`npm run test:notification:unit` não exige banco nem credenciais. `RF_TEST_ALLOW_DB=1 npm run test:notification` cria/remove banco descartável e exercita migrações, HTTP, Socket.IO e filas; os transportes SMTP/FCM são substituídos por interceptações. `RF_NOTIFICATION_REGRESSION=1` acrescenta cartões, pagamentos interceptados e localização no mesmo banco temporário. Nunca usar `NODE_ENV=production`.
+`npm run test:notification:unit` não exige banco nem credenciais. `RF_TEST_ALLOW_DB=1 npm run test:notification` cria/remove banco descartável e exercita migrações, HTTP, Socket.IO e filas; os transportes SMTP/FCM são substituídos por interceptações. `RF_NOTIFICATION_REGRESSION=1` acrescenta cartões, pagamentos interceptados, localização e logs no mesmo banco temporário. Nunca usar `NODE_ENV=production`.
 
 Os testes não consultam provedores financeiros reais nem enviam e-mails/push externos. Migrações e configurações do banco existente continuam sem alteração até uma execução operacional autorizada.

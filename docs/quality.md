@@ -21,7 +21,7 @@ O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em c
 
 - `npm run test:notification:unit`: política financeira, ordem transacional/rollback, payloads, criptografia, SMTP/FCM interceptados e timeout com destruição do socket.
 - `$env:RF_TEST_ALLOW_DB='1'; npm run test:notification`: banco temporário, incluindo migrações de outbox/canais, ownership, preferências opt-in, dispositivos, backoff/dead-letter e barreiras concorrentes de lease/exclusão.
-- Para acrescentar regressão de cartões/pagamentos/localização no mesmo banco temporário: `$env:RF_NOTIFICATION_REGRESSION='1'` antes do comando acima. Pagamentos usam provedor interceptado, sem cobranças externas.
+- Para acrescentar regressão de cartões/pagamentos/localização/logs no mesmo banco temporário: `$env:RF_NOTIFICATION_REGRESSION='1'` antes do comando acima. Pagamentos usam provedor interceptado, sem cobranças externas.
 - Não confundir resultados locais com envio/recebimento real: roteiro de configuração e validação em [notification-delivery.md](notification-delivery.md).
 - Na verificação desta etapa, 74 testes unitários e 349 integrações passaram (171 notificações, 52 cartões, 100 pagamentos, 26 localização). `npm audit` ainda aponta avisos nas dependências existentes, inclusive Nodemailer e a cadeia `node-pre-gyp`/`tar`; revisar antes de produção. Nenhum `audit fix` amplo foi aplicado.
 

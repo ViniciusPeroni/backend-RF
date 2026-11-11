@@ -30,10 +30,11 @@ const sendCode = async (req, res) => {
         const userId = uuid.toBin(id);
 
         const [rows] = await connect.promise().query(
-            `SELECT email FROM user WHERE id = ?`, [userId]
+            `SELECT email, status FROM user WHERE id = ?`, [userId]
         );
 
         if (rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado' });
+        if (rows[0].status !== 'awaitingForEmail') return res.status(403).json({ error: 'Esta conta não está aguardando confirmação de e-mail.' });
 
         const blocked = verifyRateLimit(id);
         if (blocked !== null) {
@@ -58,16 +59,26 @@ const verifyCode = async (req, res) => {
         if (!id || !code) return res.status(400).json({ error: 'ID do usuário e código são obrigatórios.' });
         if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
 
+        if (!/^\d{6}$/.test(String(code))) return res.status(400).json({ error: 'Informe o código de 6 dígitos.' });
         const conn = await connect.promise().getConnection();
         let entry;
         try {
             await conn.beginTransaction();
+            const [users] = await conn.query('SELECT status FROM `user` WHERE id = ? FOR UPDATE', [uuid.toBin(id)]);
+            if (!users.length || users[0].status !== 'awaitingForEmail') {
+                await conn.rollback();
+                return res.status(403).json({ error: 'Esta conta não está aguardando confirmação de e-mail.' });
+            }
             const result = await otpService.verifyOtp(uuid.toBin(id), String(code), conn);
             if (!result.valid) {
                 await conn.rollback();
                 return res.status(401).json({ error: result.motive });
             }
-            await conn.query("UPDATE `user` SET status = 'active' WHERE id = ?", [uuid.toBin(id)]);
+            const [activation] = await conn.query("UPDATE `user` SET status = 'active' WHERE id = ? AND status = 'awaitingForEmail'", [uuid.toBin(id)]);
+            if (!activation.affectedRows) {
+                await conn.rollback();
+                return res.status(403).json({ error: 'Não foi possível ativar esta conta.' });
+            }
             entry = await notificationOutbox.enqueue(conn, {
                 id_user: id,
                 type: 'sistema',

@@ -72,7 +72,7 @@ async function main() {
 
         const files = ['tests/notification.integration.js'];
         if (process.env.RF_NOTIFICATION_REGRESSION === '1') {
-            files.push('tests/card.integration.js', 'scripts/test-payment-integration.js', 'tests/localization.integration.js');
+            files.push('tests/card.integration.js', 'scripts/test-payment-integration.js', 'tests/localization.integration.js', 'tests/log.integration.js');
         }
         for (const file of files) {
             console.log(`Executando ${file}`);

@@ -17,7 +17,14 @@ test('ativação confirma status e outbox na mesma transação antes de enviar',
     const actions = [];
     const conn = {
         beginTransaction: async () => actions.push('begin'),
-        query: async () => { actions.push('status'); return [{ affectedRows: 1 }]; },
+        query: async (sql) => {
+            if (sql.startsWith('SELECT status')) {
+                assert.match(sql, /FOR UPDATE/);
+                actions.push('status-check');
+                return [[{ status: 'awaitingForEmail' }]];
+            }
+            actions.push('status'); return [{ affectedRows: 1 }];
+        },
         commit: async () => actions.push('commit'), rollback: async () => actions.push('rollback'),
         release: () => actions.push('release')
     };
@@ -33,7 +40,7 @@ test('ativação confirma status e outbox na mesma transação antes de enviar',
     try {
         await controller.verifyCode({ body: { id: uuid.generateId(), code: '123456' } }, res);
         assert.equal(res.code, 200);
-        assert.deepEqual(actions, ['begin', 'status', 'enqueue', 'commit', 'release', 'flush']);
+        assert.deepEqual(actions, ['begin', 'status-check', 'status', 'enqueue', 'commit', 'release', 'flush']);
     } finally {
         db.promise = before.promise; otp.verifyOtp = before.verify;
         outbox.enqueue = before.enqueue; outbox.flush = before.flush;

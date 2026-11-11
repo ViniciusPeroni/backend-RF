@@ -9,7 +9,10 @@
     "test:notification": "node scripts/test-notification-suite.js",
     "test:notification:unit": "node --test tests/notification-outbox.unit.js tests/notification-account-outbox.unit.js tests/notification-domain-outbox.unit.js tests/notification-channels.unit.js tests/payment-notification-outbox.test.js",
     "test:card": "node tests/card.integration.js",
-    "test:localization": "node tests/localization.integration.js"
+    "test:localization": "node tests/localization.integration.js",
+    "test:log": "node --test test/logRoutes.test.js test/chatSocketAudit.test.js",
+    "test:log:db": "node tests/log.integration.js",
+    "test:auth": "node tests/auth-registration.integration.js"
   },
   "author": "Vinícius Peroni",
   "license": "ISC",
