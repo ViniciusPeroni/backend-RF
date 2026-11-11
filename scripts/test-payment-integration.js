@@ -1482,6 +1482,16 @@ async function cleanup() {
             assert.equal(rows.find(row => row.disconnected_at === null).id, historicalBinding.account_id);
             assert.equal(rows.find(row => row.collector_id === "90012").disconnected_at !== null, true);
         });
+        await check("troca das credenciais da aplicação: reconectar o mesmo recebedor reaproveita o vínculo histórico", async () => {
+            assert.equal((await request("DELETE", disconnectRoute, undefined, otherToken)).status, 200);
+            // Simula o vínculo antigo feito por outra aplicação/marketplace (antes da troca das credenciais).
+            await db.query("UPDATE payment_seller_account SET application_id='999999', marketplace_id='888888' WHERE id=?", [uuid.toBin(historicalBinding.account_id)]);
+            assert.equal((await callback(await reconnect())).status, 200);
+            const [rows] = await db.query("SELECT BIN_TO_UUID(id) AS id,application_id,marketplace_id,disconnected_at FROM payment_seller_account WHERE id=?", [uuid.toBin(historicalBinding.account_id)]);
+            assert.equal(rows[0].disconnected_at, null, "O vínculo histórico deve voltar a ficar ativo");
+            assert.equal(rows[0].application_id, process.env.MERCADO_PAGO_CLIENT_ID, "O vínculo deve passar para a aplicação atual");
+            assert.notEqual(rows[0].marketplace_id, "888888", "O vínculo deve passar para o marketplace atual");
+        });
         await check("callback em andamento não reconecta depois de desvincular", async () => {
             const url = await reconnect();
             let reached;

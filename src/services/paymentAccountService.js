@@ -162,7 +162,10 @@ async function callback(query) {
         if (!existing) {
             const [history] = await conn.query("SELECT *, BIN_TO_UUID(id) AS account_id, BIN_TO_UUID(id_user) AS user_id FROM payment_seller_account WHERE collector_id = ? AND environment = ? FOR UPDATE", [verified.collectorId, config.environment]);
             existing = history[0];
-            if (existing && (existing.user_id !== state.user_id || existing.marketplace_id !== verified.marketplaceId || existing.application_id !== config.clientId)) {
+            // Mesma empresa com vínculo antigo desconectado (ex.: troca das credenciais da aplicação):
+            // reaproveita o registro e mantém o histórico dos pagamentos que apontam para ele.
+            const reconexao = existing && existing.user_id === state.user_id && existing.disconnected_at;
+            if (existing && !reconexao && (existing.user_id !== state.user_id || existing.marketplace_id !== verified.marketplaceId || existing.application_id !== config.clientId)) {
                 throw linkError("A conta Mercado Pago já possui vínculo histórico com outro vendedor ou aplicação.", "collector_linked_to_other_user");
             }
         }
@@ -170,7 +173,7 @@ async function callback(query) {
         const access = encrypt(data.access_token, `account:${id}:access`);
         const refresh = encrypt(data.refresh_token, `account:${id}:refresh`);
         if (existing) {
-            await conn.query("UPDATE payment_seller_account SET access_token_enc = ?, refresh_token_enc = ?, expires_at = ?, disconnected_at = NULL WHERE id = ?", [access, refresh, verified.expires, uuid.toBin(id)]);
+            await conn.query("UPDATE payment_seller_account SET application_id = ?, marketplace_id = ?, access_token_enc = ?, refresh_token_enc = ?, expires_at = ?, disconnected_at = NULL WHERE id = ?", [config.clientId, verified.marketplaceId, access, refresh, verified.expires, uuid.toBin(id)]);
         } else {
             await conn.query(`INSERT INTO payment_seller_account (id, id_user, environment, application_id, marketplace_id, collector_id, access_token_enc, refresh_token_enc, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [uuid.toBin(id), uuid.toBin(state.user_id), config.environment, config.clientId, verified.marketplaceId, verified.collectorId, access, refresh, verified.expires]);
