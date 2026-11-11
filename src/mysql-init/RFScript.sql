@@ -526,6 +526,103 @@ ALTER TABLE conversation
   FOREIGN KEY (id_last_message) REFERENCES message(id) ON DELETE SET NULL;
 
 
+-- =====================================================================
+-- Tabela: payment_gateway
+-- (pedido/transação no Mercado Pago de cada pagamento)
+-- =====================================================================
+DROP TABLE IF EXISTS payment_gateway;
+CREATE TABLE payment_gateway (
+    id_payment BINARY(16) PRIMARY KEY,
+    provider VARCHAR(32) NOT NULL,
+    environment VARCHAR(16) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    order_id VARCHAR(64) NULL,
+    transaction_id VARCHAR(64) NULL,
+    provider_status VARCHAR(40) NULL,
+    status_detail VARCHAR(80) NULL,
+    checkout JSON NULL,
+    updated_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_gateway_order (provider, environment, order_id),
+    CONSTRAINT fk_gateway_payment FOREIGN KEY (id_payment) REFERENCES payment(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- =====================================================================
+-- Tabela: payment_distribution
+-- (planejamento da comissão; não registra comissão recebida nem transfere dinheiro)
+-- =====================================================================
+DROP TABLE IF EXISTS payment_distribution;
+CREATE TABLE payment_distribution (
+    id_payment BINARY(16) PRIMARY KEY,
+    plan JSON NOT NULL,
+    created_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_distribution_payment FOREIGN KEY (id_payment) REFERENCES payment(id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- =====================================================================
+-- Tabela: payment_seller_account
+-- (conta Mercado Pago vinculada pela empresa; desvincular preserva o histórico)
+-- =====================================================================
+DROP TABLE IF EXISTS payment_seller_account;
+CREATE TABLE payment_seller_account (
+    id BINARY(16) PRIMARY KEY,
+    id_user BINARY(16) NOT NULL,
+    environment VARCHAR(16) NOT NULL,
+    application_id VARCHAR(40) NOT NULL,
+    marketplace_id VARCHAR(40) NOT NULL,
+    collector_id VARCHAR(40) NOT NULL,
+    access_token_enc TEXT NOT NULL,
+    refresh_token_enc TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    disconnected_at DATETIME NULL,
+    active_slot TINYINT
+        GENERATED ALWAYS AS (CASE WHEN disconnected_at IS NULL THEN 1 ELSE NULL END) STORED,
+    INDEX idx_payment_seller_user (id_user, environment),
+    UNIQUE KEY idx_payment_seller_collector (collector_id, environment),
+    UNIQUE KEY idx_payment_seller_active (id_user, environment, active_slot),
+    CONSTRAINT fk_payment_seller_user FOREIGN KEY (id_user) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
+-- =====================================================================
+-- Tabela: payment_oauth_state
+-- (estado temporário do vínculo OAuth com o Mercado Pago)
+-- =====================================================================
+DROP TABLE IF EXISTS payment_oauth_state;
+CREATE TABLE payment_oauth_state (
+    state_hash CHAR(64) PRIMARY KEY,
+    id_user BINARY(16) NOT NULL,
+    environment VARCHAR(16) NOT NULL,
+    application_id VARCHAR(40) NOT NULL,
+    marketplace_id VARCHAR(40) NOT NULL,
+    redirect_uri VARCHAR(512) NOT NULL,
+    verifier_enc TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    consumed_at DATETIME NULL,
+    CONSTRAINT fk_payment_oauth_user FOREIGN KEY (id_user) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
+-- =====================================================================
+-- Tabela: payment_split
+-- (divisão do pagamento entre a empresa e a comissão da plataforma)
+-- =====================================================================
+DROP TABLE IF EXISTS payment_split;
+CREATE TABLE payment_split (
+    id_payment BINARY(16) PRIMARY KEY,
+    id_seller BINARY(16) NOT NULL,
+    id_account BINARY(16) NOT NULL,
+    environment VARCHAR(16) NOT NULL,
+    marketplace_id VARCHAR(40) NOT NULL,
+    collector_id VARCHAR(40) NOT NULL,
+    application_fee DECIMAL(9,2) NOT NULL,
+    gross_amount DECIMAL(9,2) NOT NULL,
+    CONSTRAINT fk_payment_split_payment FOREIGN KEY (id_payment) REFERENCES payment(id) ON DELETE CASCADE,
+    CONSTRAINT fk_payment_split_seller FOREIGN KEY (id_seller) REFERENCES `user`(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_payment_split_account FOREIGN KEY (id_account) REFERENCES payment_seller_account(id) ON DELETE RESTRICT
+);
+
 
 SET FOREIGN_KEY_CHECKS = 1;
 
