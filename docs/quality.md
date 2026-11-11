@@ -25,6 +25,13 @@ O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em c
 - Não confundir resultados locais com envio/recebimento real: roteiro de configuração e validação em [notification-delivery.md](notification-delivery.md).
 - Na verificação desta etapa, 74 testes unitários e 349 integrações passaram (171 notificações, 52 cartões, 100 pagamentos, 26 localização). `npm audit` ainda aponta avisos nas dependências existentes, inclusive Nodemailer e a cadeia `node-pre-gyp`/`tar`; revisar antes de produção. Nenhum `audit fix` amplo foi aplicado.
 
+### Dependências auditadas
+
+- `bcrypt` `^6.0.0`, `nodemailer` `^10.5.0`, `mongoose` `^7.8.13` e `follow-redirects` `1.16.3` (atualizado por `npm audit fix` pontual) deixam `npm audit` sem avisos. Não foi usado `npm audit fix --force`.
+- O `bcrypt` 6 distribui binário pré-compilado (`prebuildify`) e remove `@mapbox/node-pre-gyp` e `tar` da árvore. Hashes `$2b$` de custo 10 gerados no `bcrypt` 5 continuam verificáveis no 6; a compatibilidade foi conferida com um hash gravado antes do upgrade e comparado depois, sem alterar o custo nem o prefixo.
+- `nodemailer` 10 exige Node.js 20 ou superior e mantém as APIs usadas pelo transporte (`createTransport`, gancho `getSocket`, `sendMail` e `close()`). O projeto roda em Node 22+.
+- Reexecução após o upgrade: 74 unitários de notificação, 29 de `test/`, 15 de `test:log`, 370 integrações em banco temporário (171 notificações, 52 cartões, 100 pagamentos interceptados, 26 localização, 21 logs) e os três grupos de autenticação, sem falhas. Nenhuma dessas verificações comprova entrega externa de e-mail/push.
+
 ### JavaScript alterado
 
 ```powershell

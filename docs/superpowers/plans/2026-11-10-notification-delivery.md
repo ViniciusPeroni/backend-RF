@@ -30,6 +30,6 @@ Rollback não deixa avisos; commit sem controller é recuperável; reprocessamen
 - As credenciais locais recusaram acesso; para não trocar senha/`.env`, foi inicializada instância MySQL descartável em loopback, porta 33317, com datadir exclusivo no diretório temporário aprovado.
 - Revisões independentes: corrigidas duas corridas de ressurreição após DELETE com barreiras de concorrência, resumo UTF-8 excessivo de reserva e timeout SMTP que não destruía o socket. Releituras não identificaram bloqueadores restantes nesses pontos.
 - Syntax: 31 arquivos JavaScript verificados; `git diff --check` sem erros.
-- Auditoria: avisos preexistentes nas dependências (`nodemailer`, `@mapbox/node-pre-gyp`, `tar` na árvore instalada; o lock também aponta `mongoose` e `follow-redirects`). Não foi aplicado `npm audit fix` nem upgrade amplo fora do escopo. Requer revisão de dependências antes de implantação.
+- Auditoria: os avisos preexistentes (`nodemailer`, `@mapbox/node-pre-gyp`, `tar`, `mongoose` e `follow-redirects`) foram tratados depois desta etapa com `bcrypt` 6, `nodemailer` 10.5, `mongoose` 7.8.13 e `npm audit fix` pontual; `npm audit` ficou sem avisos. Evidências em [quality.md](../../quality.md).
 - `qrcode`, já declarado no projeto, precisou ser restaurado em `node_modules` para executar os testes de pagamentos. Sem alteração de versão declarada/lock.
 - Sem SMTP/FCM externo, app real, cobrança, commit/push ou merge nesta etapa. Permanecem configuração dos provedores, integração dos clientes, aplicação de migrações no ambiente de destino e validação externa.

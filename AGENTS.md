@@ -30,6 +30,8 @@
 
 - Na integração por PR de notificações com a `main` atualizada em 10/11/2026, preservar as restrições de OTP (seis dígitos, somente `awaitingForEmail`), identidade Google validada e conta empresa, a auditoria HTTP/socket e a outbox transacional. O cadastro Google de empresa também usa o envelope já enfileirado, sem segundo aviso. Verificação do resultado combinado: 74 unitários de notificação, 29 de `test/`, 370 cenários DB (171 notificação, 52 cartão, 100 pagamento interceptado, 26 localização, 21 logs) e os três grupos de autenticação em banco temporário. Migrações produtivas e provedores externos continuam sem validação nesta operação.
 
+- Em 10/11/2026, para liberar o módulo de notificações, atualizei `bcrypt` para 6, `nodemailer` para 10.5, `mongoose` para 7.8.13 e apliquei `npm audit fix` pontual em `follow-redirects`; `npm audit` ficou sem avisos e `@mapbox/node-pre-gyp`/`tar` saíram da árvore. Hashes `$2b$` de custo 10 do bcrypt 5 continuam válidos no 6 (conferido antes/depois do upgrade). Nodemailer 10 exige Node 20+ e mantém `getSocket`/`close()` usados no transporte SMTP. Suítes reexecutadas sem falhas: 74 unitários de notificação, 29 de `test/`, 15 de `test:log`, 370 integrações em MySQL descartável e 3 grupos de autenticação. Permanecem bloqueados: migrações no banco de destino (credenciais recusadas), configuração real de SMTP/FCM/`NOTIFICATION_TOKEN_KEY` e validação em web/mobile. Nenhum envio externo foi comprovado.
+
 - Backend REST em Node.js/CommonJS, Express 4, MySQL 8 (`mysql2`) e Socket.IO. Sem TypeScript ou etapa de build.
 - `npm start` inicia `node --watch src/server.js`; porta `PORT` ou `5000`.
 - Prefixo da API: `/api/reaproveitafranca`. `.env.example` lista as variáveis de ambiente esperadas.
