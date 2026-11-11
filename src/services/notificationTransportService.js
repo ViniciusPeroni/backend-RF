@@ -39,7 +39,7 @@ async function sendEmail(to) {
     let aborted = false;
     try {
         smtp = nodemailer.createTransport({
-            host, port, secure: port === 465, requireTLS: true,
+            host, port, secure: port === 465, requireTLS: true, family: 4,
             auth: { user: process.env.NOTIFICATION_SMTP_USER, pass: process.env.NOTIFICATION_SMTP_PASS },
             tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
             connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000, dnsTimeout: 10000,

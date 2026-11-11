@@ -2,6 +2,8 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({ //obj res entrega email
     service: 'gmail',
+    // IPv4: pelo IPv6 a conexão com o Gmail travava ~20s antes de cair no IPv4.
+    family: 4,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
