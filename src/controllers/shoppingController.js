@@ -135,14 +135,16 @@ const cancelShopping = async (req, res) => {
             });
         }
 
-        if (shopping.status !== "pending") {
+        // Aceite antes do pagamento: o comprador cancela enquanto a reserva
+        // estiver aguardando aceite ou aceita e ainda não paga.
+        if (!["pending", "accepted"].includes(shopping.status)) {
             return res.status(400).json({
-                error: `Apenas compras com status "pending" podem ser canceladas. Status atual: "${shopping.status}".`
+                error: `Apenas compras aguardando aceite ou aceitas e não pagas podem ser canceladas. Status atual: "${shopping.status}".`
             });
         }
 
         const transition = await shoppingService.updateStatus(id, "cancelled", {
-            onlyPending: true,
+            allowedFrom: ["pending", "accepted"],
             notificationActorName: getActorName(req, "O comprador")
         });
 

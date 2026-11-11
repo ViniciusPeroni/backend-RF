@@ -112,8 +112,10 @@ CREATE TABLE shopping(
     datetime     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     value        DECIMAL(9,2) NOT NULL,
     status       ENUM('pending','accepted','refused','cancelled','completed') NOT NULL DEFAULT 'pending',
+    accepted_in  DATETIME NULL,
     id_user      BINARY(16) NOT NULL,
     KEY `idx_shopping_user` (`id_user`),
+    KEY `idx_shopping_status_accepted` (`status`, `accepted_in`),
     CONSTRAINT `fk_shopping_user`
         FOREIGN KEY (id_user) REFERENCES user(id)
         ON DELETE RESTRICT ON UPDATE CASCADE
