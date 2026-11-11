@@ -4,6 +4,7 @@ const cors = require("cors");
 
 const app = require("./index");
 const iniciarSockets = require("./sockets");
+const { startNotificationRetryWorker } = require("./services/notificationService");
 
 const PORT = process.env.PORT || 5000;
 
@@ -26,6 +27,9 @@ const io = new Server(httpServer, {
 
 // Registra os eventos do Socket.IO
 iniciarSockets(io);
+
+// Reprocessa notificações que falharam depois da operação de domínio.
+startNotificationRetryWorker();
 
 // Inicia o servidor
 httpServer.listen(PORT, () => {

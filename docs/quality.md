@@ -17,6 +17,14 @@ O carregamento de ambiente ocorre em `src/index.js`: tenta `dotenv-safe` e, em c
 
 ## Verificações proporcionais
 
+### Notificações: canais e outbox
+
+- `npm run test:notification:unit`: política financeira, ordem transacional/rollback, payloads, criptografia, SMTP/FCM interceptados e timeout com destruição do socket.
+- `$env:RF_TEST_ALLOW_DB='1'; npm run test:notification`: banco temporário, incluindo migrações de outbox/canais, ownership, preferências opt-in, dispositivos, backoff/dead-letter e barreiras concorrentes de lease/exclusão.
+- Para acrescentar regressão de cartões/pagamentos/localização/logs no mesmo banco temporário: `$env:RF_NOTIFICATION_REGRESSION='1'` antes do comando acima. Pagamentos usam provedor interceptado, sem cobranças externas.
+- Não confundir resultados locais com envio/recebimento real: roteiro de configuração e validação em [notification-delivery.md](notification-delivery.md).
+- Na verificação desta etapa, 74 testes unitários e 349 integrações passaram (171 notificações, 52 cartões, 100 pagamentos, 26 localização). `npm audit` ainda aponta avisos nas dependências existentes, inclusive Nodemailer e a cadeia `node-pre-gyp`/`tar`; revisar antes de produção. Nenhum `audit fix` amplo foi aplicado.
+
 ### JavaScript alterado
 
 ```powershell
@@ -33,7 +41,7 @@ Com `.env` local seguro e banco descartável/de desenvolvimento:
 - faça requisições HTTP à rota real, incluindo sucesso, payload inválido, UUID inválido, não encontrado e falhas de autenticação/autorização pertinentes;
 - confirme persistência e isolamento por usuário com dados sintéticos;
 - limite tentativas de login: `authLimiter` e cooldown de OTP podem bloquear testes repetidos.
-- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O script cria e remove dados sintéticos, mas exige um banco de desenvolvimento e Node.js 22+ com WebSocket nativo. Cobre validação, ownership, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
+- para notificações, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:notification`. O wrapper `scripts/test-notification-suite.js` cria um banco temporário `rf_notification_test_<hex>`, executa a suíte com Node.js 22+ (WebSocket nativo) e remove o banco no final, sem tocar no banco do `.env`. Cobre validação, ownership, paginação/filtros, fila de retry, expiração de JWT no socket, gatilhos existentes e concorrência (aceite único, recusa/cancelamento sem dupla reposição de estoque e revalidação de pending).
 - para cartões, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:card`. Também cria e remove usuários sintéticos e cobre validação, ownership e não exposição de `payment_token`.
 - para localização, execute `$env:RF_TEST_ALLOW_DB="1"; npm run test:localization`. Cria e remove dados sintéticos e cobre CRUD do dono, coordenadas e mascaramento do endereço do anúncio.
 

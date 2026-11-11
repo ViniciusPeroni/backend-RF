@@ -2,6 +2,7 @@ const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
 const paymentError = require("../utils/paymentError");
 const paymentNotifications = require("./paymentNotificationService");
+const notificationOutbox = require("./notificationOutboxService");
 
 async function getGateway(id) {
     const [rows] = await connect.promise().query("SELECT * FROM payment_gateway WHERE id_payment = ?", [uuid.toBin(id)]);
@@ -63,7 +64,7 @@ module.exports = {
         const payment = await getPayment(id);
         if (!payment) throw paymentError("Pagamento não encontrado.", 404);
         const conn = await connect.promise().getConnection();
-        let notify = false;
+        let notificationEntries = [];
         try {
             await conn.beginTransaction();
             // Ordem de bloqueios: compra, pagamento, provedor.
@@ -103,7 +104,6 @@ module.exports = {
                 [checkout.provider_order_id, checkout.provider_payment_id, checkout.provider_status, checkout.status_detail || null, JSON.stringify(stored), uuid.toBin(id)]
             );
             await conn.query("UPDATE payment SET status = ? WHERE id = ?", [checkout.status, uuid.toBin(id)]);
-            notify = current.status === "pending" && checkout.status === "approved";
             if (checkout.provider_api === "payments" && checkout.split_payment && ["approved", "refunded"].includes(checkout.status) && !checkout.needs_review) {
                 const [splits] = await conn.query(`SELECT s.application_fee, d.plan FROM payment_split s
                     INNER JOIN payment_distribution d ON d.id_payment = s.id_payment WHERE s.id_payment = ?`, [uuid.toBin(id)]);
@@ -124,6 +124,9 @@ module.exports = {
                     await conn.query("UPDATE shopping SET status = 'cancelled' WHERE id = ?", [uuid.toBin(payment.id_shopping)]);
                 }
             }
+            if (current.status !== checkout.status) {
+                notificationEntries = await paymentNotifications.enqueueTransition(conn, payment, checkout.status);
+            }
             await conn.commit();
         } catch (error) {
             await conn.rollback();
@@ -131,6 +134,9 @@ module.exports = {
         } finally {
             conn.release();
         }
-        if (notify) await paymentNotifications.confirmed(payment);
+        if (notificationEntries.length) {
+            try { await notificationOutbox.flush(notificationEntries); }
+            catch (error) { console.error("Falha ao entregar avisos de pagamento após commit."); }
+        }
     }
 };

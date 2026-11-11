@@ -37,6 +37,32 @@ function emitToUser(id_user, event, payload) {
     ioInstance.to(userRoom(id_user)).emit(event, payload);
 }
 
+const MAX_TIMER_DELAY = 2147483647;
+
+function scheduleTokenExpiry(socket, decoded) {
+    if (!decoded || typeof decoded.exp !== 'number') return;
+
+    const remaining = decoded.exp * 1000 - Date.now();
+
+    if (remaining <= 0) {
+        socket.disconnect(true);
+        return;
+    }
+
+    // setTimeout tem limite de ~24,8 dias; tokens longos são reagendados.
+    socket.notificationExpiryTimer = setTimeout(() => {
+        if (decoded.exp * 1000 <= Date.now()) {
+            socket.disconnect(true);
+            return;
+        }
+        scheduleTokenExpiry(socket, decoded);
+    }, Math.min(remaining, MAX_TIMER_DELAY));
+
+    if (typeof socket.notificationExpiryTimer.unref === 'function') {
+        socket.notificationExpiryTimer.unref();
+    }
+}
+
 function notificationSocket(io) {
     ioInstance = io;
 
@@ -49,6 +75,8 @@ function notificationSocket(io) {
         socket.userName = decoded.name;
 
         socket.join(userRoom(decoded.id));
+        scheduleTokenExpiry(socket, decoded);
+        socket.once('disconnect', () => clearTimeout(socket.notificationExpiryTimer));
     });
 }
 

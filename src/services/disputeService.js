@@ -1,6 +1,7 @@
 
 const connect = require("../db/connect");
 const uuid = require("../utils/uuid");
+const notificationOutbox = require("./notificationOutboxService");
 
 // Tipos válidos conforme ENUM do banco
 const VALID_TYPES = [
@@ -18,8 +19,31 @@ const VALID_STATUS = ["aberta", "em_analise", "resolvida", "rejeitada"];
 // Status considerados finalizados — impedem novas operações
 const FINAL_STATUS = ["resolvida", "rejeitada"];
 
+async function enqueueDisputeNotifications(conn, dispute, opened = false) {
+    const recipients = await disputeService.getNotificationRecipients(dispute.id_shopping, { includeAdmins: opened }, conn);
+    const uniqueRecipients = new Set(recipients.map((id) => String(id).toLowerCase()));
+    if (opened) uniqueRecipients.delete(String(dispute.id_opened_by).toLowerCase());
+
+    const entries = [];
+    for (const id_user of uniqueRecipients) {
+        entries.push(await notificationOutbox.enqueue(conn, {
+            id_user,
+            type: opened ? "disputa_aberta" : "disputa_resolvida",
+            title: opened ? "Disputa aberta" : dispute.status === "rejeitada" ? "Disputa rejeitada" : "Disputa resolvida",
+            content: opened
+                ? "Uma disputa foi aberta para uma compra da qual você participa."
+                : "A disputa da sua compra foi analisada pelo administrador.",
+            reference_table: "dispute",
+            reference_id: dispute.id
+        }));
+    }
+    return entries;
+}
+
 async function finalizeDispute(id, resolution, resolvedById, newStatus) {
     const conn = await connect.promise().getConnection();
+    let dispute;
+    let entries;
     try {
         await conn.beginTransaction();
         const [rows] = await conn.query(
@@ -43,9 +67,9 @@ async function finalizeDispute(id, resolution, resolvedById, newStatus) {
              WHERE id = ?`,
             [newStatus, resolution, uuid.toBin(resolvedById), id]
         );
-        const dispute = await disputeService.getDisputeById(id, resolvedById, "admin", conn);
+        dispute = await disputeService.getDisputeById(id, resolvedById, "admin", conn);
+        entries = await enqueueDisputeNotifications(conn, dispute);
         await conn.commit();
-        return dispute;
     } catch (error) {
         try { await conn.rollback(); } catch (rollbackError) {
             console.error("Falha no rollback da finalização de disputa:", rollbackError.code || "ROLLBACK_FAILED");
@@ -54,6 +78,8 @@ async function finalizeDispute(id, resolution, resolvedById, newStatus) {
     } finally {
         conn.release();
     }
+    await notificationOutbox.flush(entries);
+    return dispute;
 }
 
 const disputeService = {
@@ -66,6 +92,8 @@ const disputeService = {
     // =========================================================
     async createDispute(data) {
         const conn = await connect.promise().getConnection();
+        let id;
+        let entries;
         try {
             await conn.beginTransaction();
 
@@ -110,14 +138,18 @@ const disputeService = {
                 throw err;
             }
 
-            const id = uuid.generateId();
+            id = uuid.generateId();
             await conn.query(
                 `INSERT INTO dispute (id, type, description, status, id_shopping, id_opened_by)
                  VALUES (?, ?, ?, 'aberta', ?, ?)`,
                 [uuid.toBin(id), data.type, data.description, uuid.toBin(data.id_shopping), uuid.toBin(data.id_opened_by)]
             );
+            entries = await enqueueDisputeNotifications(conn, {
+                id,
+                id_shopping: data.id_shopping,
+                id_opened_by: data.id_opened_by
+            }, true);
             await conn.commit();
-            return id;
         } catch (error) {
             try { await conn.rollback(); } catch (rollbackError) {
                 console.error("Falha no rollback da abertura de disputa:", rollbackError.code || "ROLLBACK_FAILED");
@@ -126,11 +158,13 @@ const disputeService = {
         } finally {
             conn.release();
         }
+        await notificationOutbox.flush(entries);
+        return id;
     },
 
-    async getNotificationRecipients(shoppingId, { includeAdmins = false } = {}) {
+    async getNotificationRecipients(shoppingId, { includeAdmins = false } = {}, conn = connect.promise()) {
         const params = [uuid.toBin(shoppingId), uuid.toBin(shoppingId)];
-        const [rows] = await connect.promise().query(
+        const [rows] = await conn.query(
             `SELECT BIN_TO_UUID(id_user) AS id_user FROM shopping WHERE id = ?
              UNION
              SELECT BIN_TO_UUID(p.id_user) AS id_user FROM shopping_product sp

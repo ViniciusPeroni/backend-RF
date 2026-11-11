@@ -28,12 +28,12 @@ module.exports = {
         await sendEmailOtp(email, code);
     },
 
-    async verifyOtp(userId, informed_code) {
+    async verifyOtp(userId, informed_code, connection = connect.promise()) {
         const userIdBin = Buffer.isBuffer(userId) ? userId : uuid.toBin(userId);
-        const [rows] = await connect.promise().query(
+        const [rows] = await connection.query(
             `SELECT * FROM otp 
              WHERE user_id = ? AND used = 0 AND expires_at > NOW()
-             ORDER BY id DESC LIMIT 1`,
+             ORDER BY id DESC LIMIT 1 FOR UPDATE`,
             [userIdBin]
         );
 
@@ -44,7 +44,7 @@ module.exports = {
         if (otp.code !== informed_code) return { valid: false, motive: 'Código incorreto' };
 
         // Marca como usado
-        await connect.promise().query(
+        await connection.query(
             `UPDATE otp SET used = 1 WHERE id = ?`, [otp.id]
         );
 

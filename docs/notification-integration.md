@@ -1,15 +1,17 @@
 # Integração de notificações entre fluxos
 
-Este documento descreve os gatilhos implementados, seus destinatários e os limites da infraestrutura de notificações. Review e disputa já estão integrados; pagamento permanece como contrato futuro até existir seu fluxo de domínio.
+Este documento descreve os gatilhos implementados, seus destinatários e os limites da infraestrutura de notificações. Review, disputa e pagamento estão integrados; a entrega persistida tem fila de retry, a listagem é paginada e o socket é desconectado no vencimento do JWT.
 
 ## Escopo
 
 - A branch de notificação é dona de `notificationService`, `notificationController`, `notificationRoutes` e `notificationSocket`.
 - As branches de pagamento, review e disputa são donas dos respectivos controllers/services/rotas.
-- Cada fluxo de domínio deve chamar `notificationService.notifyUser(...)` **depois** de confirmar a operação no banco.
-- Falha ao notificar não deve desfazer a operação de domínio nem impedir a resposta HTTP de sucesso.
+- Cada fluxo de domínio grava seu envelope com `notificationOutboxService.enqueue(conn, data)` **dentro** da transação e chama `flush` **depois** do commit e da liberação da conexão.
+- Falha de envio não desfaz a operação confirmada. Falha ao gravar o evento durável antes do commit causa rollback para não perder avisos.
 
 ## Contrato do serviço
+
+Para novos gatilhos transacionais use `notificationOutboxService.enqueue(conn, payload)` antes do commit e `flush(entries)` após liberar a conexão. Os exemplos abaixo mostram os **payloads**; chamar `notifyUser` isoladamente não cria atomicidade com uma operação de domínio anterior. Os gatilhos de produção já foram movidos para a outbox.
 
 ```js
 const notificationService = require('../services/notificationService');
@@ -34,6 +36,18 @@ await notificationService.notifyUser({
 | `reference_id` | Não | UUID do registro referenciado |
 
 O serviço persiste a notificação, busca o registro criado e emite o evento Socket.IO `notification` para a sala `user:<id_user>`. Não é necessário emitir o evento manualmente no controller de domínio.
+
+## Entrega e retry
+
+O caminho feliz é síncrono: `notifyUser` persiste em `notification`, lê o registro e emite `notification`. Se a persistência falhar, a falha continua sendo lançada ao chamador e o aviso é gravado em `notification_retry` com `persisted = 0` e o mesmo UUID que seria usado na notificação. Se a falha ocorrer depois do INSERT (leitura ou emissão), a linha vai para a fila com `persisted = 1`; o retry apenas reemite, sem inserir de novo.
+
+`retryPending({ limit, maxAttempts })` reivindica linhas vencidas com `FOR UPDATE SKIP LOCKED`, tenta entregar, apaga a linha em caso de sucesso e aplica backoff exponencial (2, 4, 8... segundos, teto de 300 s) em caso de falha. Depois de `maxAttempts` (padrão 5), a linha é retida com `failed_in` para revisão. `startNotificationRetryWorker` roda a cada 30 s a partir de `src/server.js`, com guarda de execução sobreposta e timer `unref`. O retry não refaz a operação de domínio.
+
+A fila exige as migrações de retry, outbox e canais em bancos existentes. Ordem, configuração e critérios externos: [notification-delivery.md](notification-delivery.md).
+
+## Listagem
+
+`GET /notification/` aceita `read`, `type`, `reference_table`, `reference_id`, `limit` (1..100, padrão 50) e `offset` (>=0). A resposta continua um array, ordenado por `created_in DESC, id DESC`. Sem parâmetros, o cliente antigo continua funcionando e recebe até 50 itens.
 
 ## Tipos de notificação
 
@@ -67,11 +81,11 @@ O serviço persiste a notificação, busca o registro criado e emite o evento So
 
 ### Pagamento
 
-**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, confirma o commit e chama `paymentNotificationService.confirmed`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha na entrega não desfaz a operação. Não há outbox para repetir uma entrega interrompida.
+**Implementado no módulo de pagamentos:** `paymentGatewayService.applyCheckout` identifica a transição sob lock, chama `paymentNotificationService.enqueueTransition` na mesma conexão e confirma o commit. Depois de liberar a conexão, chama `notificationOutboxService.flush`. O estado vem do provedor autenticado ou de simulação explicitamente habilitada fora de produção. Repetições não notificam novamente; falha de envio não desfaz a operação. O envelope já gravado em `notification_retry` é recuperado pelo worker.
 
 **Transição que notifica:** `payment.status` de `pending` para `approved`.
 
-`refused` e `refunded` **não** usam `pagamento_confirmado`, porque o tipo indica confirmação. Se a equipe quiser avisar recusa ou estorno, use `sistema` e registre a decisão; este contrato não cobre esse caso.
+`refused` e `refunded` usam `sistema`, nunca `pagamento_confirmado`. Recusa avisa somente o comprador; estorno avisa comprador, vendedores e admins ativos. A política assumida nesta etapa e os textos constam em [notification-delivery.md](notification-delivery.md).
 
 **Destinatários (decisão da equipe: "todos os tipos de usuários"):**
 
@@ -118,7 +132,7 @@ Cuidados:
 
 ### Avaliação
 
-**Implementado:** `reviewController.createReview` chama `notifyUser` depois de o service confirmar o INSERT. As duas rotas de criação usam esse mesmo handler. A resposta HTTP continua `{ message, id }`.
+**Implementado:** `reviewService.createReview` confirma o INSERT e o envelope da outbox na mesma transação e tenta enviar depois do commit/liberação. As duas rotas usam o mesmo controller, sem segundo envio. A resposta HTTP continua `{ message, id }`.
 
 **Decisão:** avaliação **bilateral**. O comprador avalia o vendedor e o vendedor avalia o comprador. Base: RN23 do documento de requisitos ("cada participante poderá avaliar a outra parte uma única vez por negociação").
 
@@ -151,7 +165,7 @@ Cada INSERT de review confirmado gera uma `nova_review` para o avaliado, nunca p
 
 ### Disputa
 
-**Implementado:** `disputeController` chama o serviço de notificações depois de a abertura/finalização ser confirmada. `disputeService.getNotificationRecipients` obtém comprador e vendedores (mais admins ativos apenas na abertura). UUIDs são deduplicados e o autor é excluído somente de `disputa_aberta`.
+**Implementado:** `disputeService` grava os envelopes antes de confirmar abertura/finalização e tenta enviar após o commit/liberação. `getNotificationRecipients` usa a mesma conexão para obter comprador e vendedores (mais admins ativos apenas na abertura). UUIDs são deduplicados e o autor é excluído somente de `disputa_aberta`.
 
 A tabela `dispute` já existe: `type`, `description`, `status`, `resolution`, `created_in`, `updated_in`, `resolved_in`, `id_shopping`, `id_resolved_by`, `id_opened_by`. Ela corresponde ao RF10 ("Gerenciamento de Negociações") do documento de requisitos.
 
@@ -212,7 +226,7 @@ Cuidados:
 - notifique apenas na transição real de status, não em cada `UPDATE`;
 - em compra com vários vendedores, cada parte recebe uma notificação.
 - um vendedor com vários itens ou que também seja admin recebe só um aviso por evento;
-- falha ao consultar destinatários ou enviar aviso não desfaz a disputa; falha individual não impede tentar avisar os demais.
+- falha de envio depois do commit não desfaz a disputa e não impede tentar avisar os demais; falha ao consultar destinatários/gravar envelopes antes do commit causa rollback para não confirmar uma disputa sem aviso recuperável.
 
 ## Origem das decisões de destinatário
 
@@ -233,12 +247,13 @@ const connect = require('../db/connect');
 
 ## Idempotência e duplicidade
 
-- Notifique apenas em transições reais de estado. Em compras, `shoppingService.updateStatus` decide `{ previousStatus, changed }` sob `SELECT ... FOR UPDATE` e devolve a compra lida na mesma transação; o controller só notifica se `changed`. Comparar apenas uma leitura anterior feita fora da transação permite avisos duplicados em requisições simultâneas.
+- Notifique apenas em transições reais de estado. Em compras, `shoppingService.updateStatus` decide `{ previousStatus, changed }` sob `SELECT ... FOR UPDATE` e só enfileira se `changed`. Comparar apenas uma leitura anterior feita fora da transação permite avisos duplicados em requisições simultâneas.
 - Repetir a mesma ação não deve criar outra notificação.
 - Aceite repetido permanece 200 sem novo aviso; recusa/cancelamento em compra finalizada permanecem 400. `/cancel` revalida `pending` dentro da transação. Recusa/cancelamento restauram estoque somente uma vez.
 - Webhooks de pagamento devem ser idempotentes; registre o identificador do evento ou verifique o status anterior antes de notificar.
 - Criação de review depende da UNIQUE existente. Abertura de disputa serializa a verificação/inserção por compra em uma transação; uma disputa ativa do mesmo autor/compra retorna 409. Resolver/rejeitar usa lock da disputa e snapshot na conexão transacional: só a primeira finalização tem sucesso, as demais retornam 409 sem aviso.
 - A edição comum condiciona seu UPDATE ao status permitido para não reabrir uma disputa finalizada nem editar como autor depois de entrar em análise por uma operação concorrente. Esses conflitos retornam 409.
+- A fila de retry reutiliza o UUID da notificação: linhas com `persisted = 1` apenas reemitem; linhas com `persisted = 0` inserem no máximo uma vez e então reemitem. Repetir o processing não cria uma segunda linha em `notification`.
 - Não emita o evento `notification` manualmente: `notifyUser` já faz isso.
 
 ## Verificação
@@ -249,16 +264,21 @@ Com banco de desenvolvimento, dependências instaladas e Node.js 22+ (WebSocket 
 $env:RF_TEST_ALLOW_DB="1"; npm run test:notification
 ```
 
-O script `tests/notification.integration.js`:
+O script `scripts/test-notification-suite.js` cria um banco temporário `rf_notification_test_<hex>` com as tabelas do schema versionado, executa `tests/notification.integration.js` apontando `DB_NAME` para ele e remove o banco no final. Não copia nem altera o banco configurado no `.env`; a suíte não pode recriar `Reaproveita_Franca`.
+
+`tests/notification.integration.js`:
 
 - exige `RF_TEST_ALLOW_DB=1` para evitar execução acidental em banco importante;
 - cria usuários, produtos, conversa e compras sintéticas;
 - testa CRUD de notificações, ownership, filtros, contagem, read-all, exclusão e eventos Socket.IO;
+- testa paginação (`limit`/`offset`), filtro por `reference_table`/`reference_id` e validação dos parâmetros;
+- testa a fila de retry/outbox: rollback, recuperação de commit sem controller, mesmo UUID, exclusão concorrente, lease antigo e retenção auditável após o máximo de tentativas;
 - testa cadastro, OTP, nova mensagem e os gatilhos de compra/reserva;
 - chama `tests/helpers/reviewDisputeNotifications.js` para exercitar criação bilateral de review, disputa aberta/resolvida/rejeitada, destinatários, falhas de aviso/consulta, concorrência e entrega Socket.IO real;
 - rejeita payloads com tipos inválidos e conteúdo acima de 65.535 bytes UTF-8 antes de chegar ao MySQL;
 - força leituras concorrentes de reservas e testa aviso único, estoque e cancelamento com leitura desatualizada;
 - conecta clientes WebSocket ao Socket.IO real para testar `notification`, `notification_read`, `notifications_read_all` e `notification_deleted` em duas sessões do dono, sem entrega a outro usuário, anônimo ou JWT inválido/já expirado;
+- confirma que a sessão é desconectada quando o JWT vence;
 - verifica recuperação por GET de uma notificação criada offline e entrega de novos eventos após reconectar;
 - remove os dados sintéticos no final.
 
@@ -270,10 +290,12 @@ Os casos de disputa recusam banco que já tenha admins ativos antes de criar sua
 
 - O gatilho de pagamento (`pagamento_confirmado`) já está integrado pelo módulo de pagamentos com split; review/disputa já têm API e integração de avisos.
 - O documento de requisitos não define explicitamente os destinatários de notificações. A abertura por qualquer parte, originalmente inferida do RF10/schema, é o comportamento dos services que chegaram à main; esta integração não amplia suas permissões.
-- Recusa e estorno de pagamento não têm tipo de notificação definido; se necessário, use `sistema` e registre a decisão.
+- Recusa e estorno de pagamento usam `sistema`, com destinatários/textos fixos descritos em [notification-delivery.md](notification-delivery.md).
 - A suíte cobre integração com MySQL, mas não substitui testes de carga, segurança ou clientes reais.
 - `join_conversation` agora valida identidade, UUID e participação; versões anteriores destes guias descreviam a implementação antiga.
 - Socket.IO não oferece replay automático dos avisos offline: depois de reconectar, o cliente consulta `GET /notification/` ou `?read=nao`. Os eventos em tempo real não substituem essa leitura.
-- Não há outbox, fila de retry ou garantia de entrega após queda entre commit de domínio e gravação da notificação. A proteção de concorrência das reservas não é deduplicação global do serviço.
-- JWT é validado no ingresso; expiração posterior não desconecta automaticamente sessões abertas. O teste de token expirado cobre o ingresso, não revogação contínua.
+- A outbox participa da transação do domínio e sobrevive a reinícios. Não há entrega externa "exactly once": uma falha depois do envio e antes do registro de sucesso pode repetir um evento com o mesmo UUID.
+- O worker pressupõe o Socket.IO inicializado, como em `src/server.js`, que registra sockets antes de iniciar o worker. Em um processo sem `io`, a notificação é persistida mas não emitida em tempo real; o cliente ainda a recupera por `GET /notification/`.
+- JWT é validado no ingresso e a sessão é desconectada no `exp` do token. Revogação imediata de um token ainda válido (logout/troca de senha) não é propagada para sockets já conectados.
 - Transporte real local não comprova integração com front/mobile, push com app fechado ou serviços SMTP/OAuth externos.
+- O teste verifica a desconexão no vencimento com um token de curta duração; não mede precisão de relógio entre servidor e cliente.

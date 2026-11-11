@@ -1,6 +1,5 @@
 
 const disputeService = require("../services/disputeService");
-const notificationService = require("../services/notificationService");
 const uuid = require("../utils/uuid");
 
 // Tipos válidos para validação no controller (espelho do service/banco)
@@ -12,34 +11,6 @@ const VALID_TYPES = [
     "item_danificado",
     "outro"
 ];
-
-async function notifyDisputeParticipants(dispute, opened = false) {
-    try {
-        const recipients = await disputeService.getNotificationRecipients(dispute.id_shopping, { includeAdmins: opened });
-        const uniqueRecipients = new Set(recipients.map((id) => String(id).toLowerCase()));
-        if (opened) uniqueRecipients.delete(String(dispute.id_opened_by).toLowerCase());
-
-        for (const id_user of uniqueRecipients) {
-            try {
-                await notificationService.notifyUser({
-                    id_user,
-                    type: opened ? "disputa_aberta" : "disputa_resolvida",
-                    title: opened ? "Disputa aberta" : dispute.status === "rejeitada" ? "Disputa rejeitada" : "Disputa resolvida",
-                    content: opened
-                        ? "Uma disputa foi aberta para uma compra da qual você participa."
-                        : "A disputa da sua compra foi analisada pelo administrador.",
-                    reference_table: "dispute",
-                    reference_id: dispute.id
-                });
-            } catch (error) {
-                console.error("Erro ao notificar participante sobre disputa:", error.code || "NOTIFICATION_FAILED");
-            }
-        }
-    } catch (error) {
-        console.error("Erro ao buscar destinatários da disputa:", error.code || "NOTIFICATION_FAILED");
-    }
-}
-
 
 // =========================================================
 // CRIAR DISPUTA
@@ -85,8 +56,6 @@ const createDispute = async (req, res) => {
             id_shopping,
             id_opened_by: req.userId
         });
-
-        await notifyDisputeParticipants({ id, id_shopping, id_opened_by: req.userId }, true);
 
         return res.status(201).json({
             message: "Disputa aberta com sucesso.",
@@ -280,8 +249,6 @@ const resolveDispute = async (req, res) => {
             return res.status(404).json({ error: "Disputa não encontrada." });
         }
 
-        await notifyDisputeParticipants(dispute);
-
         return res.status(200).json({
             message: "Disputa resolvida com sucesso.",
             dispute
@@ -332,8 +299,6 @@ const rejectDispute = async (req, res) => {
         if (!dispute) {
             return res.status(404).json({ error: "Disputa não encontrada." });
         }
-
-        await notifyDisputeParticipants(dispute);
 
         return res.status(200).json({
             message: "Disputa rejeitada com sucesso.",

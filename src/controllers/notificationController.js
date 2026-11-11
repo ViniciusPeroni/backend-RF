@@ -85,7 +85,10 @@ const createNotification = async (req, res) => {
 };
 
 const listNotifications = async (req, res) => {
-    const { read, type } = req.query;
+    const { read, type, reference_id } = req.query;
+    const reference_table = req.query.reference_table;
+    const limitRaw = req.query.limit;
+    const offsetRaw = req.query.offset;
 
     if (read && !['sim', 'nao'].includes(read)) {
         return res.status(400).json({ error: "read inválido. Valores permitidos: 'sim' ou 'nao'." });
@@ -95,8 +98,46 @@ const listNotifications = async (req, res) => {
         return res.status(400).json({ error: 'type inválido.' });
     }
 
+    let referenceTable;
+    if (reference_table !== undefined) {
+        if (typeof reference_table !== 'string' || !reference_table.trim()) {
+            return res.status(400).json({ error: 'reference_table deve ser um texto não vazio.' });
+        }
+        referenceTable = reference_table.trim();
+        if (referenceTable.length > 30) {
+            return res.status(400).json({ error: 'reference_table deve ter no máximo 30 caracteres.' });
+        }
+    }
+
+    if (reference_id !== undefined && !isValid(reference_id)) {
+        return res.status(400).json({ error: 'reference_id inválido.' });
+    }
+
+    let limit;
+    if (limitRaw !== undefined) {
+        limit = Number(limitRaw);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+            return res.status(400).json({ error: 'limit deve ser um inteiro entre 1 e 100.' });
+        }
+    }
+
+    let offset;
+    if (offsetRaw !== undefined) {
+        offset = Number(offsetRaw);
+        if (!Number.isInteger(offset) || offset < 0 || offset > 2147483647) {
+            return res.status(400).json({ error: 'offset deve ser um inteiro entre 0 e 2147483647.' });
+        }
+    }
+
     try {
-        const notifications = await notificationService.listNotifications(req.userId, { read, type });
+        const notifications = await notificationService.listNotifications(req.userId, {
+            read,
+            type,
+            reference_table: referenceTable,
+            reference_id,
+            ...(limit !== undefined ? { limit } : {}),
+            ...(offset !== undefined ? { offset } : {})
+        });
 
         return res.status(200).json(notifications);
     } catch (err) {

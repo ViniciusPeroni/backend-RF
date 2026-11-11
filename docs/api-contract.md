@@ -62,12 +62,15 @@ Snapshot da montagem em `src/routes/apiRoutes.js` e `src/routes/modules/*Routes.
 | document | `POST /document/`, `GET /document/user/:userId`, `GET /document/:id` | JWT + limitador global | Criar/listar metadados; verificar ownership no controller antes de expor |
 | document | `GET /document/:id/decrypt`, `DELETE /document/:id` | JWT + admin | Descriptografar/excluir documento |
 | notification | `POST /notification/` | JWT | Cria notificação para `req.userId`; o destinatário não é aceito do body. Corpo objeto JSON; título textual não vazio, até 100 caracteres; `content` opcional textual, até 65.535 bytes UTF-8; `reference_table` opcional textual não vazio, até 30 caracteres; `reference_id` opcional UUID. Campos opcionais aceitam null; entrada inválida retorna 400 |
-| notification | `GET /notification/` | JWT | Lista as notificações do usuário; filtros `read=sim|nao` e `type` |
+| notification | `GET /notification/` | JWT | Lista as notificações do usuário; filtros `read=sim|nao`, `type`, `reference_table` e `reference_id`; paginação `limit` (1..100, padrão 50) e `offset` (>=0, padrão 0). Parâmetro inválido retorna 400. O corpo continua sendo um array |
 | notification | `GET /notification/unread/count` | JWT | Retorna `{ total }` de não lidas |
 | notification | `PATCH /notification/read-all` | JWT | Marca as notificações do usuário como lidas |
 | notification | `GET /notification/:id` | JWT | Consulta a notificação do próprio usuário; não pertencente/inexistente retorna 404 |
 | notification | `PATCH /notification/:id/read` | JWT | Marca como lida e define `read_in` |
 | notification | `DELETE /notification/:id` | JWT | Exclui somente notificação do usuário autenticado |
+| notification | `GET/PUT /notification/preferences` | JWT | Preferências opt-in `email` e `push`, booleanos; padrão false; PUT exige ambos e recusa campos extras |
+| notification | `PUT /notification/devices/:id` | JWT | Registra/rotaciona token FCM para o próprio usuário; body `{ token, platform }`, até dez dispositivos; sem token na resposta; conflito de vínculo retorna 409 |
+| notification | `DELETE /notification/devices/:id` | JWT | Desvincula dispositivo próprio, cancela pendências; 204 ou 404; não aceita corpo |
 
 Os payloads e códigos HTTP variam e devem ser obtidos dos controllers. Não derive contrato detalhado apenas desta tabela.
 
@@ -86,7 +89,7 @@ Pagamentos estão descritos em [payments.md](payments.md): cadastro, consultas p
 
 Nas reservas, a mudança de status é decidida sob `SELECT ... FOR UPDATE`: dois aceites simultâneos retornam 200, mas apenas uma transição gera `reserva_aceita`. Repetir recusa/cancelamento de compra finalizada continua retornando 400, sem nova reposição de estoque ou aviso. `/cancel` revalida `pending` dentro da transação. Os formatos das respostas HTTP não mudam.
 
-Eventos de notificação não são reproduzidos automaticamente após reconectar: o cliente deve consultar `GET /notification/` (ou `?read=nao`) para recuperar avisos persistidos offline. A assinatura/expiração do JWT é validada no ingresso; não há desconexão automática na expiração posterior do token.
+Eventos de notificação não são reproduzidos automaticamente após reconectar: o cliente deve consultar `GET /notification/` (ou `?read=nao`) para recuperar avisos persistidos offline. A assinatura/expiração do JWT é validada no ingresso e a sessão Socket.IO é desconectada quando o `exp` do token vence; tokens já expirados não entram na sala de eventos.
 
 ## Lacunas relevantes
 

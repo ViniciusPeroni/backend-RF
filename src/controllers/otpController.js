@@ -1,6 +1,6 @@
 const otpService = require('../services/otpService');
 const connect = require('../db/connect');
-const notificationService = require('../services/notificationService');
+const notificationOutbox = require('../services/notificationOutboxService');
 const uuid = require('../utils/uuid');
 
 // Rate limit: 30s entre cada envio por usuário
@@ -60,31 +60,37 @@ const verifyCode = async (req, res) => {
         if (!uuid.isValid(id)) return res.status(400).json({ error: 'ID do usuário inválido.' });
 
         if (!/^\d{6}$/.test(String(code))) return res.status(400).json({ error: 'Informe o código de 6 dígitos.' });
-        const [users] = await connect.promise().query('SELECT status FROM `user` WHERE id = ?', [uuid.toBin(id)]);
-        if (!users.length || users[0].status !== 'awaitingForEmail') return res.status(403).json({ error: 'Esta conta não está aguardando confirmação de e-mail.' });
-
-        const result = await otpService.verifyOtp(uuid.toBin(id), String(code));
-
-        if (!result.valid) {
-            return res.status(401).json({ error: result.motive });
-        }
-
-        const [activation] = await connect.promise().query(
-            `UPDATE user SET status = 'active' WHERE id = ? AND status = 'awaitingForEmail'`,
-            [uuid.toBin(id)]
-        );
-        if (!activation.affectedRows) return res.status(403).json({ error: 'Não foi possível ativar esta conta.' });
-
+        const conn = await connect.promise().getConnection();
+        let entry;
         try {
-            await notificationService.notifyUser({
+            await conn.beginTransaction();
+            const [users] = await conn.query('SELECT status FROM `user` WHERE id = ? FOR UPDATE', [uuid.toBin(id)]);
+            if (!users.length || users[0].status !== 'awaitingForEmail') {
+                await conn.rollback();
+                return res.status(403).json({ error: 'Esta conta não está aguardando confirmação de e-mail.' });
+            }
+            const result = await otpService.verifyOtp(uuid.toBin(id), String(code), conn);
+            if (!result.valid) {
+                await conn.rollback();
+                return res.status(401).json({ error: result.motive });
+            }
+            const [activation] = await conn.query("UPDATE `user` SET status = 'active' WHERE id = ? AND status = 'awaitingForEmail'", [uuid.toBin(id)]);
+            if (!activation.affectedRows) {
+                await conn.rollback();
+                return res.status(403).json({ error: 'Não foi possível ativar esta conta.' });
+            }
+            entry = await notificationOutbox.enqueue(conn, {
                 id_user: id,
                 type: 'sistema',
                 title: 'Conta ativada',
                 content: 'Seu e-mail foi confirmado e sua conta está ativa.'
             });
-        } catch (notifyError) {
-            console.error('Erro ao notificar ativação da conta:', notifyError);
-        }
+            await conn.commit();
+        } catch (error) {
+            await conn.rollback();
+            throw error;
+        } finally { conn.release(); }
+        await notificationOutbox.flush([entry]);
 
         return res.status(200).json({
             message: "Email confirmado! Faça seu login!"

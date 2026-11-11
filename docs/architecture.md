@@ -7,7 +7,7 @@ Este repositório contém a API do Reaproveita Franca. Web e mobile são aplica�
 ## Inicialização e fluxo
 
 - `npm start` executa `node --watch src/server.js`.
-- `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets e escuta em `PORT` ou `5000`.
+- `src/server.js` importa o Express, configura CORS, cria HTTP/Socket.IO, registra sockets, inicia o worker de retry de notificações e escuta em `PORT` ou `5000`.
 - `src/index.js` carrega ambiente, cria parsers e rotas, chama o teste de conexão MySQL e monta `/api/reaproveitafranca`.
 - `src/index.js` tenta `dotenv-safe` e captura falhas para recorrer a `dotenv`. Não assuma validação fatal sem conferir o boot real.
 - Integração Mercado Pago usa as variáveis `MERCADO_PAGO_*` e `PAYMENT_*` descritas em [payments.md](payments.md) e [payment-split.md](payment-split.md).
@@ -55,7 +55,7 @@ src/
 
 `join_conversation` exige autenticação, UUID válido e participação em `conversation_participant`. Cadastro e ativação por OTP também geram notificações `sistema`; a criação de compra gera `reserva_solicitada` para cada vendedor, o aceite/recusa gera `reserva_aceita`/`reserva_recusada` para o comprador e o cancelamento gera `sistema` para cada vendedor. `src/cron.js` está desativado e chama `cleanUpMessages`, que não está implementado.
 
-`shoppingService.updateStatus(id, newStatus, { onlyPending = false } = {})` lê o status sob `SELECT ... FOR UPDATE`, aplica as restrições e retorna `{ shopping, previousStatus, changed }`. A compra retornada é lida na mesma conexão/transação antes do commit. Os controllers preservam a resposta HTTP e só notificam se `changed`; `/cancel` também valida `pending` sob o lock. Falhas de notificação não desfazem a transição já confirmada. Não há outbox/fila/retry persistente: uma queda entre commit e aviso pode deixar de produzir a notificação.
+`shoppingService.updateStatus(id, newStatus, { onlyPending = false, notificationActorName } = {})` lê o status sob `SELECT ... FOR UPDATE`, aplica as restrições e retorna `{ shopping, previousStatus, changed }`. A compra retornada e seus envelopes de notificação são preparados na mesma conexão/transação antes do commit. O serviço só enfileira se `changed`; `/cancel` valida `pending` sob o lock. Depois do commit/liberação da conexão, tenta enviar. Falhas de envio não desfazem a transição confirmada; falhas ao gravar a outbox antes do commit causam rollback. A mesma regra vale para review, disputa, mensagem, cadastro/OTP e avisos financeiros. Detalhes e liberação externa em [notification-delivery.md](notification-delivery.md).
 
 `reviewController.createReview` avisa o avaliado após o INSERT; a UNIQUE por compra/autor impede duplicatas simultâneas. Edição não notifica. `disputeService.createDispute` bloqueia a compra em uma conexão transacional antes de conferir disputa ativa do mesmo autor e inserir. Resolver/rejeitar compartilham uma finalização que bloqueia a disputa, impede estados finais repetidos e devolve o snapshot antes do commit. A edição comum usa uma condição de status no UPDATE para não desfazer finalização concorrente. Os formatos de retorno dos services de review/disputa permanecem iguais.
 

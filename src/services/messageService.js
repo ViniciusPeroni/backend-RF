@@ -1,9 +1,10 @@
 const connect = require('../db/connect');
 const { generateId, toBin, isValid } = require('../utils/uuid');
+const notificationOutbox = require('./notificationOutboxService');
 
 const MESSAGE_TYPES = ['texto', 'imagem', 'audio', 'arquivo'];
 
-async function ensureUserBelongsToConversation(conversationId, userId) {
+async function ensureUserBelongsToConversation(conversationId, userId, conn = connect.promise()) {
     if (!isValid(conversationId) || !userId) {
         const err = new Error('conversationId ou userId inválido.');
         err.status = 400;
@@ -13,7 +14,7 @@ async function ensureUserBelongsToConversation(conversationId, userId) {
     const conversationIdBin = toBin(conversationId);
     const userIdBin = toBin(userId);
 
-    const [conversationRows] = await connect.promise().query(
+    const [conversationRows] = await conn.query(
         'SELECT id FROM conversation WHERE id = ?',
         [conversationIdBin]
     );
@@ -24,7 +25,7 @@ async function ensureUserBelongsToConversation(conversationId, userId) {
         throw err;
     }
 
-    const [participantRows] = await connect.promise().query(
+    const [participantRows] = await conn.query(
         `SELECT 1
          FROM conversation_participant
          WHERE id_conversation = ? AND id_user = ?
@@ -44,61 +45,90 @@ async function createMessage({
     id_user,
     type,
     content,
-    id_answer
+    id_answer,
+    senderName = 'Usuário'
 }) {
     const conversationIdBin = toBin(conversationId);
     const userId = String(id_user).toLowerCase();
+    const conn = await connect.promise().getConnection();
+    const entries = [];
+    let id;
+    let recipients;
+    try {
+        await conn.beginTransaction();
 
-    await ensureUserBelongsToConversation(conversationId, id_user);
+        await ensureUserBelongsToConversation(conversationId, id_user, conn);
 
-    const [participantRows] = await connect.promise().query(
-        `SELECT BIN_TO_UUID(id_user) AS id_user
-         FROM conversation_participant
-         WHERE id_conversation = ?`,
-        [conversationIdBin]
-    );
+        const [participantRows] = await conn.query(
+            `SELECT BIN_TO_UUID(id_user) AS id_user
+             FROM conversation_participant
+             WHERE id_conversation = ?`,
+            [conversationIdBin]
+        );
 
-    const participants = participantRows.map((row) => String(row.id_user).toLowerCase());
+        const participants = participantRows.map((row) => String(row.id_user).toLowerCase());
+        recipients = [...new Set(participants.filter((participantId) => participantId !== userId))];
+        id = generateId();
 
-    const recipients = participants.filter((participantId) => participantId !== userId);
-    const id = generateId();
+        await conn.query(
+            `INSERT INTO message (
+                id,
+                type,
+                content,
+                id_user,
+                id_conversation,
+                id_answer
+            )
+            VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+                toBin(id),
+                type,
+                content ?? null,
+                toBin(id_user),
+                conversationIdBin,
+                id_answer ? toBin(id_answer) : null
+            ]
+        );
 
-    await connect.promise().query(
-        `INSERT INTO message (
-            id,
-            type,
-            content,
-            id_user,
-            id_conversation,
-            id_answer
-        )
-        VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-            toBin(id),
-            type,
-            content ?? null,
-            toBin(id_user),
-            conversationIdBin,
-            id_answer ? toBin(id_answer) : null
-        ]
-    );
+        await conn.query(
+            `UPDATE conversation
+             SET
+                 updated_in = NOW(),
+                 id_last_message = ?
+             WHERE id = ?`,
+            [toBin(id), conversationIdBin]
+        );
 
-    await connect.promise().query(
-        `UPDATE conversation
-         SET
-            updated_in = NOW(),
-            id_last_message = ?
-         WHERE id = ?`,
-        [toBin(id), conversationIdBin]
-    );
+        await conn.query(
+            `UPDATE conversation_participant
+             SET id_last_read_message = ?
+             WHERE id_conversation = ? AND id_user = ?`,
+            [toBin(id), conversationIdBin, toBin(id_user)]
+        );
 
-    await connect.promise().query(
-        `UPDATE conversation_participant
-         SET id_last_read_message = ?
-         WHERE id_conversation = ? AND id_user = ?`,
-        [toBin(id), conversationIdBin, toBin(id_user)]
-    );
-
+        const preview = type === 'texto'
+            ? String(content).trim().slice(0, 120)
+            : `Enviou uma mensagem do tipo ${type}.`;
+        for (const recipient of recipients) {
+            entries.push(await notificationOutbox.enqueue(conn, {
+                id_user: recipient,
+                type: 'nova_mensagem',
+                title: `Nova mensagem de ${senderName}`.slice(0, 100),
+                content: preview,
+                reference_table: 'conversation',
+                reference_id: conversationId
+            }));
+        }
+        await conn.commit();
+    } catch (error) {
+        try { await conn.rollback(); } catch (rollbackError) {
+            console.error('Falha no rollback da mensagem:', rollbackError.code || 'ROLLBACK_FAILED');
+        }
+        throw error;
+    } finally {
+        conn.release();
+    }
+    await notificationOutbox.flush(entries);
     return { id, recipients };
 }
 
