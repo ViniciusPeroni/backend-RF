@@ -176,13 +176,26 @@ describe("productController.createProduct", () => {
 });
 
 describe("productController.getProducts", () => {
-    test("devolve a lista de produtos", async () => {
+    test("devolve a lista de produtos com fotos por padrão", async () => {
         const products = [{ id: PRODUCT_ID, name: "Geladeira" }];
         const list = jest.spyOn(productService, "getProducts").mockResolvedValue(products);
 
         const { status, body } = await invoke(controller.getProducts);
 
-        expect(list).toHaveBeenCalledWith();
+        expect(list).toHaveBeenCalledWith({ withPhotos: true });
+        expect(status).toBe(200);
+        expect(body).toEqual(products);
+    });
+
+    test("lista sem fotos quando photos=none", async () => {
+        const products = [{ id: PRODUCT_ID, name: "Geladeira" }];
+        const list = jest.spyOn(productService, "getProducts").mockResolvedValue(products);
+
+        const { status, body } = await invoke(controller.getProducts, {
+            query: { photos: "none" }
+        });
+
+        expect(list).toHaveBeenCalledWith({ withPhotos: false });
         expect(status).toBe(200);
         expect(body).toEqual(products);
     });
