@@ -35,7 +35,7 @@ npm run test:jest
 
 - `jest.config.js` usa `testEnvironment: node`, `testMatch` em `__tests__/**/*.test.js` e `setupFiles` com `__tests__/helpers/env.js` (SECRET e chaves de documento sintéticas, nenhuma credencial real).
 - `__tests__/helpers/http.js` monta `req`/`res` falsos (`invoke`, `serviceError`, `unexpectedError`), então nenhuma porta, conexão MySQL ou variável de ambiente de produção é necessária.
-- Um arquivo por controller em `src/controllers` (18 arquivos, 721 cenários na verificação desta etapa). Cada handler cobre sucesso, validação de entrada, erro de service com `status` e falha inesperada, além das regras de autorização/ownership decididas na própria controller.
+- Um arquivo por controller em `src/controllers` (18 arquivos, 722 cenários na verificação desta etapa). Cada handler cobre sucesso, validação de entrada, erro de service com `status` e falha inesperada, além das regras de autorização/ownership decididas na própria controller.
 - `userController` e `otpController` mockam `src/db/connect` (`connect.promise()`); `notificationController` mocka `emitToUser`; os controllers de pagamento mockam os services e o provider. Nenhuma cobrança, e-mail, OTP ou requisição externa é disparada.
 - Aviso conhecido: com vários workers no Windows o Jest pode imprimir `A worker process has failed to exit gracefully` por causa do pool `mysql2` criado no require de `src/db/connect`. Com `--runInBand` o aviso não aparece e `--detectOpenHandles` não reporta handles pendentes.
 - O que ela **não** prova: contrato HTTP real, middleware `verifyJWT`/admin, SQL, persistência, Socket.IO e integração com provedores. Para isso continuam valendo as suítes de integração e as verificações HTTP manuais abaixo.
